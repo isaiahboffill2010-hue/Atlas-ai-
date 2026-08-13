@@ -1,0 +1,21 @@
+:root{
+  --bg:#0f1720;
+  --panel:#0b1220;
+  --muted:#9aa4b2;
+  --accent:#00a8f3;
+}
+*{box-sizing:border-box}
+html,body,#__next{height:100%}
+body{
+  margin:0;
+  font-family:Inter, ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial;
+  background:linear-gradient(180deg,#071021 0%, #0e1a2a 100%);
+  color:#e6eef6;
+}
+/* Full-screen Atlas layout */
+.atlas-full{width:100vw;height:100vh;display:flex;align-items:center;justify-content:center;background:#ffffff;margin:0;padding:0;overflow:hidden}
+.atlas-full > div{display:flex;align-items:center;justify-content:center;width:100%;height:100%}
+.atlas-full img{max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain}
+.atlas-full video{max-width:100vw;max-height:100vh;width:auto;height:auto;object-fit:contain}
+
+/* remove other UI styles (developer controls removed) */
