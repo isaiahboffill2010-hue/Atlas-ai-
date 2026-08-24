@@ -89,6 +89,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Missing required fields' })
     }
 
+    const uploadedFile = file as { filename: string; data: Buffer }
+
     // Validate category and type
     if (!CATEGORY_TYPE_MAP[category] || !CATEGORY_TYPE_MAP[category][type]) {
       console.error(`[Upload] Invalid category or type: ${category}/${type}`)
@@ -108,7 +110,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     // Save file
-    const filePath = path.join(knowledgeDir, file.filename)
+    const filePath = path.join(knowledgeDir, uploadedFile.filename)
 
     // Check if file already exists
     if (fs.existsSync(filePath)) {
@@ -117,17 +119,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     }
 
     console.log(`[Upload] Writing file: ${filePath}`)
-    fs.writeFileSync(filePath, file.data)
+    fs.writeFileSync(filePath, uploadedFile.data)
 
     // Add to database
     const relativeDbPath = path.relative(process.cwd(), filePath)
     console.log(`[Upload] Adding to database: ${relativeDbPath}`)
     const record = addFile({
-      name: file.filename,
+      name: uploadedFile.filename,
       path: relativeDbPath,
       category,
       type,
-      size: file.data.length,
+      size: uploadedFile.data.length,
     })
 
     console.log(`[Upload] Success: ${record.id}`)

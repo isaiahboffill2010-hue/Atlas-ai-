@@ -1,3 +1,5 @@
+import { speakText, stopSpeaking } from './tts'
+
 const SILENCE_TIMEOUT_MS = 2000
 const DEBUG = true
 
@@ -41,12 +43,12 @@ function normalizeTranscript(text: string): string {
 
 function matchesWakeWord(transcript: string): boolean {
   const normalized = normalizeTranscript(transcript)
-  // Match "hey atlas" as the wake word (exact or as standalone phrase)
+  // Match "hey" as the wake word (must be standalone, not part of another word)
   return (
-    normalized === 'hey atlas' ||
-    normalized.startsWith('hey atlas ') ||
-    normalized.endsWith(' hey atlas') ||
-    normalized.includes(' hey atlas ')
+    normalized === 'hey' ||
+    normalized.startsWith('hey ') ||
+    normalized.endsWith(' hey') ||
+    normalized.includes(' hey ')
   )
 }
 
@@ -141,7 +143,7 @@ class VoiceInteraction {
           log(`Heard (final): "${transcript}" [confidence: ${(confidence * 100).toFixed(0)}%]`)
 
           if (matchesWakeWord(transcript)) {
-            log('Wake word detected!')
+            log('✓ Wake word "Hey" detected - starting request capture')
             this.stopWakeWordDetection()
             callbacks.onWakeWordDetected?.()
             return
@@ -270,6 +272,32 @@ class VoiceInteraction {
       }
     }
     // Clear the flag after a brief delay to allow onend to fire
+    setTimeout(() => {
+      this.intentionallyStopping = false
+    }, 100)
+  }
+
+  async pauseWakeWordDetection() {
+    log('Pausing wake-word detection')
+    this.clearRestartTimer()
+    this.intentionallyStopping = true
+
+    if (this.mode === 'wake-word') {
+      this.mode = null
+    }
+
+    if (this.recognition && this.isListening) {
+      try {
+        ;(this.recognition as any).abort()
+      } catch (e) {
+        try {
+          this.recognition.stop()
+        } catch (e2) {
+          log(`Error pausing wake-word recognition: ${e2}`)
+        }
+      }
+    }
+
     setTimeout(() => {
       this.intentionallyStopping = false
     }, 100)
@@ -486,7 +514,6 @@ class VoiceInteraction {
   }
 
   async speak(text: string, onEnd?: () => void): Promise<void> {
-    const { speakText, stopSpeaking } = await import('./tts')
     try {
       log('Starting ElevenLabs TTS')
       await speakText(text, () => {
@@ -534,12 +561,7 @@ class VoiceInteraction {
     }
 
     // Stop TTS playback
-    try {
-      const { stopSpeaking } = await import('./tts')
-      stopSpeaking()
-    } catch (e) {
-      // TTS module might not be available
-    }
+    stopSpeaking()
 
     this.isSpeaking = false
     this.isListening = false

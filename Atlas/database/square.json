@@ -1,0 +1,18 @@
+{
+  "pairing": {
+    "merchant_id": null,
+    "location_id": null,
+    "device_code_id": null,
+    "device_code": null,
+    "device_name": "Atlas Front Desk",
+    "device_id": null,
+    "status": null,
+    "pair_by": null,
+    "created_at": null,
+    "updated_at": null,
+    "paired_at": null
+  },
+  "webhook_events": {},
+  "payments": [],
+  "updated_at": null
+}
