@@ -25,35 +25,83 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
 
   const categories: CategoryInfo[] = [
     {
-      id: 'Business',
-      name: 'Business',
-      icon: '📊',
-      description: 'Books, strategy, finance, entrepreneurship and research.',
-      path: 'knowledge/Business/',
+      id: 'LifeStory',
+      name: 'Life Story',
+      icon: '📖',
+      description: 'Major life events, timeline, and milestones.',
+      path: 'knowledge/LifeStory/',
       count: 0,
     },
     {
-      id: 'Printing',
-      name: 'Printing',
-      icon: '🖨️',
-      description: 'Manuals, guides, pricing, and technical documentation.',
-      path: 'knowledge/Printing/',
+      id: 'Childhood',
+      name: 'Childhood',
+      icon: '👶',
+      description: 'Early memories, family background, and formative years.',
+      path: 'knowledge/Childhood/',
       count: 0,
     },
     {
-      id: 'Education',
-      name: 'Education',
-      icon: '📚',
-      description: 'Books, courses, research papers, and learning materials.',
-      path: 'knowledge/Education/',
+      id: 'FamilyRelationships',
+      name: 'Family & Relationships',
+      icon: '👨‍👩‍👧‍👦',
+      description: 'Family members, relationships, and close connections.',
+      path: 'knowledge/FamilyRelationships/',
       count: 0,
     },
     {
-      id: 'Personal',
-      name: 'Personal',
-      icon: '📝',
-      description: 'Notes, projects, decisions, and personal knowledge.',
-      path: 'knowledge/Personal/',
+      id: 'ImportantMemories',
+      name: 'Important Memories',
+      icon: '⭐',
+      description: 'Significant events, moments, and memories that matter.',
+      path: 'knowledge/ImportantMemories/',
+      count: 0,
+    },
+    {
+      id: 'PersonalityTraits',
+      name: 'Personality & Traits',
+      icon: '✨',
+      description: 'Personality characteristics, values, and what makes them unique.',
+      path: 'knowledge/PersonalityTraits/',
+      count: 0,
+    },
+    {
+      id: 'WorkCareer',
+      name: 'Work & Career',
+      icon: '💼',
+      description: 'Professional history, achievements, and work experiences.',
+      path: 'knowledge/WorkCareer/',
+      count: 0,
+    },
+    {
+      id: 'LikesDislikes',
+      name: 'Likes & Dislikes',
+      icon: '❤️',
+      description: 'Preferences, favorite things, and things they dislike.',
+      path: 'knowledge/LikesDislikes/',
+      count: 0,
+    },
+    {
+      id: 'LifeLessons',
+      name: 'Life Lessons',
+      icon: '💡',
+      description: 'Wisdom, lessons learned, and life philosophies.',
+      path: 'knowledge/LifeLessons/',
+      count: 0,
+    },
+    {
+      id: 'PersonalStories',
+      name: 'Personal Stories',
+      icon: '🎭',
+      description: 'Stories, anecdotes, and interesting tales.',
+      path: 'knowledge/PersonalStories/',
+      count: 0,
+    },
+    {
+      id: 'Other',
+      name: 'Other',
+      icon: '📋',
+      description: 'Any other personal information or memories.',
+      path: 'knowledge/Other/',
       count: 0,
     },
   ]
@@ -99,7 +147,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
   }, [search, files])
 
   const handleDeleteFile = async (id: string) => {
-    if (!window.confirm('Delete this file?\n\nThis will permanently remove the file from Atlas\'s local knowledge library.')) {
+    if (!window.confirm('Delete this memory?\n\nThis will permanently remove it from the Memory Library.')) {
       return
     }
 
@@ -216,7 +264,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
             color: '#e6eef6',
           }}
         >
-          Atlas Library
+          Memory Library
         </h1>
         <p
           style={{
@@ -225,7 +273,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
             color: 'rgba(230, 238, 246, 0.7)',
           }}
         >
-          Manage the knowledge Atlas can access.
+          Build a personal knowledge base about this person.
         </p>
 
         {/* Search and Add */}
@@ -244,7 +292,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
           >
             <input
               type="text"
-              placeholder="Search knowledge..."
+              placeholder="Search memories..."
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               style={{
@@ -291,7 +339,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
               e.currentTarget.style.transform = 'translateY(0)'
             }}
           >
-            + Add Knowledge
+            + Add Memory
           </button>
         </div>
       </div>
@@ -331,7 +379,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
                   opacity: 0.8,
                 }}
               >
-                Knowledge Categories
+                Memory Categories
               </h2>
               <div
                 style={{
@@ -410,7 +458,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
                   opacity: 0.8,
                 }}
               >
-                {search ? `Search Results (${filteredFiles.length})` : `All Knowledge (${filteredFiles.length})`}
+                {search ? `Search Results (${filteredFiles.length})` : `All Memories (${filteredFiles.length})`}
               </h2>
 
               {filteredFiles.length === 0 ? (
@@ -422,11 +470,11 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
                   }}
                 >
                   <p style={{ margin: '0 0 12px 0', fontSize: '16px' }}>
-                    {search ? 'No files found.' : 'Your Atlas Library is empty.'}
+                    {search ? 'No files found.' : 'Your Memory Library is empty.'}
                   </p>
                   {!search && (
                     <p style={{ margin: 0, fontSize: '13px' }}>
-                      Add books, manuals, research, notes, and other knowledge to give Atlas more context.
+                      Add documents, stories, photos, and memories to build a personal knowledge base about this person.
                     </p>
                   )}
                 </div>
@@ -618,7 +666,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
                 return (
                   <div>
                     <p style={{ margin: '0 0 8px 0', color: 'rgba(230, 238, 246, 0.6)', fontSize: '11px', textTransform: 'uppercase', letterSpacing: '0.5px' }}>
-                      Knowledge Processing
+                      Memory Processing
                     </p>
                     <p style={{ margin: 0, color: badge.color, fontSize: '13px', fontWeight: 500 }}>
                       {badge.icon} {badge.label}
@@ -655,7 +703,7 @@ export const LibraryDashboard = forwardRef<{ refetch: () => Promise<void> }, Lib
                     e.currentTarget.style.transform = 'translateY(0)'
                   }}
                 >
-                  📖 Read Knowledge
+                  📖 Read Memory
                 </button>
               )}
               <button

@@ -10,7 +10,7 @@ interface SidebarProps {
 export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, currentPage }) => {
   const navItems = [
     { id: 'home', label: 'Home', href: '/' },
-    { id: 'library', label: 'Library', href: '/library' },
+    { id: 'library', label: 'Memory Library', href: '/library' },
     { id: 'memory', label: 'Memory', href: '/memory', coming: true },
     { id: 'tools', label: 'Tools', href: '/tools', coming: true },
     { id: 'settings', label: 'Settings', href: '/settings', coming: true },
@@ -158,7 +158,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isOpen, onClose, currentPage }
           }}
         >
           <p style={{ margin: 0 }}>Atlas v0.1.0</p>
-          <p style={{ margin: '4px 0 0 0' }}>Phase 1 • Library</p>
+          <p style={{ margin: '4px 0 0 0' }}>Phase 1 • Memory Library</p>
         </div>
       </div>
 

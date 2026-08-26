@@ -7,15 +7,21 @@ interface AddKnowledgeModalProps {
 }
 
 const CATEGORY_TYPES: Record<string, string[]> = {
-  Business: ['Book', 'Note', 'Research', 'Pricing'],
-  Printing: ['Book', 'Manual', 'Pricing'],
-  Education: ['Book', 'Research'],
-  Personal: ['Note', 'Project', 'Decision'],
+  LifeStory: ['Document', 'Memory', 'Note'],
+  Childhood: ['Document', 'Memory', 'Story'],
+  FamilyRelationships: ['Document', 'Memory', 'Story'],
+  ImportantMemories: ['Document', 'Memory', 'Story'],
+  PersonalityTraits: ['Document', 'Note', 'Description'],
+  WorkCareer: ['Document', 'Memory', 'Note'],
+  LikesDislikes: ['Document', 'List', 'Note'],
+  LifeLessons: ['Document', 'Note', 'Story'],
+  PersonalStories: ['Document', 'Story', 'Memory'],
+  Other: ['Document', 'Note', 'Memory'],
 }
 
 export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const [category, setCategory] = useState<string>('Business')
-  const [type, setType] = useState<string>('Book')
+  const [category, setCategory] = useState<string>('LifeStory')
+  const [type, setType] = useState<string>('Document')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -68,8 +74,8 @@ export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({ isOpen, on
 
       if (res.ok) {
         setFile(null)
-        setCategory('Business')
-        setType('Book')
+        setCategory('LifeStory')
+        setType('Document')
         onClose()
         onSuccess()
       } else {
@@ -119,7 +125,7 @@ export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({ isOpen, on
         }}
       >
         <h2 style={{ margin: '0 0 24px 0', color: '#e6eef6', fontSize: '24px', fontWeight: 600 }}>
-          Add Knowledge
+          Add Memory
         </h2>
 
         <form onSubmit={handleSubmit}>

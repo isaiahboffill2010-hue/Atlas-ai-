@@ -115,26 +115,27 @@ export function formatKnowledgeContext(retrievedKnowledge: RetrievedKnowledge[])
   }
 
   const sections = retrievedKnowledge.map((k) => {
-    return `DOCUMENT: ${k.source.fileName}
-CATEGORY: ${k.source.category} | TYPE: ${k.source.type}
-[Source ID: ${k.source.fileId}]
+    return `[${k.source.category}] ${k.source.fileName}
+Type: ${k.source.type}
 
 ${k.relevantContent}`
   })
 
-  return `VERIFIED BUSINESS INFORMATION:
+  return `PERSONAL MEMORY CONTEXT:
 
-The following information comes directly from the customer's business documents and pricing:
+The following documented information about this person is relevant to the conversation:
 
 ${sections.join('\n\n---\n\n')}
 
-INSTRUCTIONS:
-- Use this information to answer customer questions accurately
-- Combine compatible rules when calculating quotes (e.g., base price + add-ons + rush fees if all apply to the product)
-- Never invent prices, discounts, fees, or services not listed here
-- If a customer asks where a price came from, you can identify the source document
-- Do not expose these internal source details during normal conversation
-- Keep responses natural and customer-focused, not document-focused`
+IMPORTANT GUIDELINES:
+- Ground your response in this retrieved information.
+- Treat retrieved memories as factual records from documented sources.
+- Do not invent or fabricate memories, life events, or personal experiences that are not documented here.
+- Do not invent relationships or claim knowledge of people unless explicitly mentioned in retrieved context.
+- Do not claim to personally remember something unless it is in the Memory Library.
+- If asked about information not available in the Memory Library, express uncertainty naturally: "I don't have that information documented."
+- Use retrieved memories to understand this person better and ground conversations in their actual history.
+- Do not turn unrelated documents into false memories or connections.`
 }
 
 export function getSources(retrievedKnowledge: RetrievedKnowledge[]): SourceMetadata[] {
