@@ -244,20 +244,44 @@ export default function MusicPlayer() {
   }
 
   const pauseMusic = () => {
+    console.log('[MusicPlayer] pauseMusic() called')
     if (playerRef.current) {
-      playerRef.current.pauseVideo()
+      try {
+        playerRef.current.pauseVideo()
+        console.log('[MusicPlayer] ✓ pauseVideo() called on YouTube player')
+      } catch (error) {
+        console.error('[MusicPlayer] Error pausing video:', error)
+      }
+    } else {
+      console.error('[MusicPlayer] ✗ No player available to pause')
     }
   }
 
   const resumeMusic = () => {
+    console.log('[MusicPlayer] resumeMusic() called')
     if (playerRef.current) {
-      playerRef.current.playVideo()
+      try {
+        playerRef.current.playVideo()
+        console.log('[MusicPlayer] ✓ playVideo() called on YouTube player (resume)')
+      } catch (error) {
+        console.error('[MusicPlayer] Error resuming video:', error)
+      }
+    } else {
+      console.error('[MusicPlayer] ✗ No player available to resume')
     }
   }
 
   const stopMusic = () => {
+    console.log('[MusicPlayer] stopMusic() called')
     if (playerRef.current) {
-      playerRef.current.stopVideo()
+      try {
+        playerRef.current.stopVideo()
+        console.log('[MusicPlayer] ✓ stopVideo() called on YouTube player')
+      } catch (error) {
+        console.error('[MusicPlayer] Error stopping video:', error)
+      }
+    } else {
+      console.log('[MusicPlayer] No player to stop (may already be stopped)')
     }
   }
 

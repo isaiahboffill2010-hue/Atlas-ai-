@@ -60,37 +60,55 @@ export async function handleMusicCommand(command: MusicCommand, query?: string):
       }
 
       case 'pause': {
-        console.log('[Music] Pausing')
+        console.log('[Music] Pause command: pausing playback')
         setMusicError(null)
-        setMusicPlayerState('paused')
 
         if ((window as any).atlasMusic?.pause) {
+          console.log('[Music] Calling atlasMusic.pause()')
           ;(window as any).atlasMusic.pause()
+          // State will be updated by YouTube's onStateChange event
+          console.log('[Music] ✓ pauseVideo() called, state will update from YouTube')
+        } else {
+          console.error('[Music] ✗ atlasMusic.pause not available')
+          setMusicError('Music player not available')
+          return false
         }
 
         return true
       }
 
       case 'resume': {
-        console.log('[Music] Resuming')
+        console.log('[Music] Resume command: resuming playback')
         setMusicError(null)
-        setMusicPlayerState('playing')
 
         if ((window as any).atlasMusic?.resume) {
+          console.log('[Music] Calling atlasMusic.resume()')
           ;(window as any).atlasMusic.resume()
+          // State will be updated by YouTube's onStateChange event
+          console.log('[Music] ✓ playVideo() called, state will update from YouTube')
+        } else {
+          console.error('[Music] ✗ atlasMusic.resume not available')
+          setMusicError('Music player not available')
+          return false
         }
 
         return true
       }
 
       case 'stop': {
-        console.log('[Music] Stopping')
+        console.log('[Music] Stop command: stopping music and clearing current song')
         setMusicError(null)
-        resetMusicPlayer()
 
         if ((window as any).atlasMusic?.stop) {
+          console.log('[Music] Calling atlasMusic.stop()')
           ;(window as any).atlasMusic.stop()
+          console.log('[Music] ✓ stopVideo() called')
         }
+
+        // Clear the current song completely
+        console.log('[Music] Resetting music player state')
+        resetMusicPlayer()
+        console.log('[Music] ✓ Music state reset, card will disappear')
 
         return true
       }

@@ -38,15 +38,11 @@ export function parseMusicCommand(transcript: string): ParsedMusicCommand {
 
   const normalized = transcript.trim()
 
-  // Check for play command
-  for (const pattern of PLAY_PATTERNS) {
-    const match = normalized.match(pattern)
-    if (match) {
-      const query = match[1]?.trim()
-      if (query) {
-        console.log(`[Music] Play command detected: "${query}"`)
-        return { command: 'play', query }
-      }
+  // Check for stop command (most specific)
+  for (const pattern of STOP_PATTERNS) {
+    if (pattern.test(normalized)) {
+      console.log(`[Music] Stop command detected`)
+      return { command: 'stop' }
     }
   }
 
@@ -58,7 +54,7 @@ export function parseMusicCommand(transcript: string): ParsedMusicCommand {
     }
   }
 
-  // Check for resume command
+  // Check for resume command (BEFORE play, so "play again" is caught as resume)
   for (const pattern of RESUME_PATTERNS) {
     if (pattern.test(normalized)) {
       console.log(`[Music] Resume command detected`)
@@ -66,11 +62,15 @@ export function parseMusicCommand(transcript: string): ParsedMusicCommand {
     }
   }
 
-  // Check for stop command
-  for (const pattern of STOP_PATTERNS) {
-    if (pattern.test(normalized)) {
-      console.log(`[Music] Stop music command detected`)
-      return { command: 'stop' }
+  // Check for play command (most general - must be last)
+  for (const pattern of PLAY_PATTERNS) {
+    const match = normalized.match(pattern)
+    if (match) {
+      const query = match[1]?.trim()
+      if (query) {
+        console.log(`[Music] Play command detected: "${query}"`)
+        return { command: 'play', query }
+      }
     }
   }
 
