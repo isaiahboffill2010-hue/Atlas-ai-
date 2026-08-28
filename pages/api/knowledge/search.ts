@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
 import { retrieveKnowledge, formatKnowledgeContext } from '../../../lib/knowledge/knowledge-retriever'
+import { getAllKnowledgeFiles } from '../../../lib/supabase/library-db'
 
 interface SearchResponse {
   query: string
@@ -23,7 +24,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
   try {
     console.log(`[KnowledgeSearch] Testing query: ${query}`)
 
-    const retrieved = await retrieveKnowledge(query)
+    const retrieved = await retrieveKnowledge(query, getAllKnowledgeFiles)
     const formatted = formatKnowledgeContext(retrieved)
 
     console.log(`[KnowledgeSearch] Found ${retrieved.length} relevant documents`)

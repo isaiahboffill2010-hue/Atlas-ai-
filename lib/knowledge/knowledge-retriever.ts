@@ -1,4 +1,4 @@
-import { getFiles, FileRecord } from '../db'
+import { KnowledgeFile } from '../supabase/library-db'
 
 export interface SourceMetadata {
   fileId: string
@@ -64,11 +64,15 @@ function extractRelevantSections(text: string, query: string, contextLines: numb
   return relevantLines.join('\n')
 }
 
-export async function retrieveKnowledge(query: string): Promise<RetrievedKnowledge[]> {
+export async function retrieveKnowledge(
+  query: string,
+  getAllKnowledgeFiles?: () => Promise<KnowledgeFile[]>
+): Promise<RetrievedKnowledge[]> {
   console.log(`[Knowledge] Query: ${query}`)
 
   try {
-    const files = getFiles()
+    // Use provided function or fall back to empty (requires Supabase in calling code)
+    const files = getAllKnowledgeFiles ? await getAllKnowledgeFiles() : []
     const readyFiles = files.filter((f) => f.processing_status === 'ready' && f.extracted_text)
 
     console.log(`[Knowledge] Searching ${readyFiles.length} ready documents`)

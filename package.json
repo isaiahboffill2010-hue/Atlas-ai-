@@ -12,6 +12,7 @@
   },
   "dependencies": {
     "@openclaw/gateway-client": "^2026.8.1-beta.1",
+    "@supabase/supabase-js": "^2.112.4",
     "@tensorflow-models/coco-ssd": "^2.2.3",
     "@tensorflow/tfjs": "^4.22.0",
     "agentmail": "^0.5.19",

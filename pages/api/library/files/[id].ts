@@ -1,9 +1,12 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import fs from 'fs'
-import path from 'path'
-import { getFile, deleteFile } from '../../../../lib/db'
+import {
+  getKnowledgeFile,
+  deleteKnowledgeFile,
+  deleteKnowledgeChunks,
+} from '../../../../lib/supabase/library-db'
+import { deleteFileFromStorage } from '../../../../lib/supabase/storage'
 
-export default function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   const { id } = req.query
 
   if (req.method !== 'DELETE') {
@@ -18,35 +21,37 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
   try {
     console.log(`[Delete API] Deleting file: ${id}`)
 
-    // Get file record
-    const file = getFile(id)
+    // Get file record from Supabase
+    const file = await getKnowledgeFile(id)
     if (!file) {
       console.error(`[Delete API] File not found: ${id}`)
       return res.status(404).json({ error: 'File not found' })
     }
 
-    console.log(`[Delete API] Found file: ${file.name} at ${file.path}`)
+    console.log(`[Delete API] Found file: ${file.name} at ${file.storage_path}`)
 
-    // Delete physical file
-    const filePath = path.join(process.cwd(), file.path)
-    console.log(`[Delete API] Physical path: ${filePath}`)
+    try {
+      // Delete from Supabase Storage
+      console.log(`[Delete API] Deleting from Supabase Storage`)
+      await deleteFileFromStorage(file.storage_path)
+      console.log(`[Delete API] File deleted from Storage`)
+    } catch (storageError) {
+      console.warn(`[Delete API] Error deleting from Storage:`, storageError)
+      // Continue with database cleanup even if storage deletion fails
+    }
 
-    if (fs.existsSync(filePath)) {
-      console.log(`[Delete API] Deleting physical file`)
-      fs.unlinkSync(filePath)
-      console.log(`[Delete API] Physical file deleted`)
-    } else {
-      console.warn(`[Delete API] Physical file not found at ${filePath}`)
+    try {
+      // Delete knowledge chunks
+      console.log(`[Delete API] Deleting knowledge chunks`)
+      await deleteKnowledgeChunks(id)
+    } catch (chunksError) {
+      console.warn(`[Delete API] Error deleting chunks:`, chunksError)
+      // Continue with record deletion
     }
 
     // Delete database record
     console.log(`[Delete API] Deleting database record`)
-    const deleted = deleteFile(id)
-
-    if (!deleted) {
-      console.error(`[Delete API] Failed to delete from database`)
-      return res.status(500).json({ error: 'Failed to delete file from database' })
-    }
+    await deleteKnowledgeFile(id)
 
     console.log(`[Delete API] File deleted successfully`)
     return res.status(200).json({
@@ -55,6 +60,8 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     })
   } catch (error) {
     console.error('[Delete API] Unexpected error:', error)
-    return res.status(500).json({ error: 'Failed to delete file: ' + (error instanceof Error ? error.message : 'Unknown error') })
+    return res.status(500).json({
+      error: 'Failed to delete file: ' + (error instanceof Error ? error.message : 'Unknown error'),
+    })
   }
 }

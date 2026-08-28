@@ -1,8 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from 'next'
-import fs from 'fs'
-import path from 'path'
 import Busboy from 'busboy'
-import { addFile } from '../../../lib/db'
+import { addKnowledgeFile } from '../../../lib/supabase/library-db'
+import { uploadFileToStorage } from '../../../lib/supabase/storage'
 
 const CATEGORY_TYPE_MAP: Record<string, Record<string, string>> = {
   Business: {
@@ -97,46 +96,36 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(400).json({ error: 'Invalid category or type' })
     }
 
-    // Determine subfolder
-    const subfolder = CATEGORY_TYPE_MAP[category][type]
-    const knowledgeDir = path.join(process.cwd(), 'Atlas', 'knowledge', category, subfolder)
+    try {
+      // Upload to Supabase Storage
+      console.log(`[Upload] Uploading to Supabase Storage...`)
+      const storagePath = await uploadFileToStorage(
+        category,
+        CATEGORY_TYPE_MAP[category][type],
+        uploadedFile.filename,
+        uploadedFile.data
+      )
 
-    console.log(`[Upload] Knowledge directory: ${knowledgeDir}`)
+      // Add to Supabase database
+      console.log(`[Upload] Adding to Supabase database...`)
+      const record = await addKnowledgeFile({
+        name: uploadedFile.filename,
+        category: category as 'Business' | 'Printing' | 'Education' | 'Personal',
+        type: CATEGORY_TYPE_MAP[category][type],
+        storage_path: storagePath,
+        file_size: uploadedFile.data.length,
+        processing_status: 'pending',
+      })
 
-    // Create directory if it doesn't exist
-    if (!fs.existsSync(knowledgeDir)) {
-      console.log(`[Upload] Creating directory: ${knowledgeDir}`)
-      fs.mkdirSync(knowledgeDir, { recursive: true })
+      console.log(`[Upload] Success: ${record.id}`)
+      return res.status(200).json({
+        success: true,
+        file: record,
+      })
+    } catch (uploadError) {
+      console.error(`[Upload] Supabase upload error:`, uploadError)
+      throw uploadError
     }
-
-    // Save file
-    const filePath = path.join(knowledgeDir, uploadedFile.filename)
-
-    // Check if file already exists
-    if (fs.existsSync(filePath)) {
-      console.error(`[Upload] File already exists: ${filePath}`)
-      return res.status(409).json({ error: 'File already exists' })
-    }
-
-    console.log(`[Upload] Writing file: ${filePath}`)
-    fs.writeFileSync(filePath, uploadedFile.data)
-
-    // Add to database
-    const relativeDbPath = path.relative(process.cwd(), filePath)
-    console.log(`[Upload] Adding to database: ${relativeDbPath}`)
-    const record = addFile({
-      name: uploadedFile.filename,
-      path: relativeDbPath,
-      category,
-      type,
-      size: uploadedFile.data.length,
-    })
-
-    console.log(`[Upload] Success: ${record.id}`)
-    return res.status(200).json({
-      success: true,
-      file: record,
-    })
   } catch (error) {
     console.error('[Upload] Unexpected error:', error)
     return res.status(500).json({ error: 'Upload failed: ' + (error instanceof Error ? error.message : 'Unknown error') })

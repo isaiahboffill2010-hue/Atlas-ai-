@@ -1,28 +1,15 @@
-import fs from 'fs'
-import path from 'path'
 import pdfParse from 'pdf-parse'
-import { FileRecord } from '../db'
 
 export interface ExtractedDocument {
-  fileId: string
   fileName: string
-  category: string
-  type: string
   pages: number
   text: string
   extractedAt: number
 }
 
-export async function extractPdfText(filePath: string): Promise<string> {
+export async function extractPdfText(fileBuffer: Buffer): Promise<string> {
   try {
-    console.log(`[DocumentProcessor] Extracting PDF: ${filePath}`)
-
-    // Read the PDF file
-    if (!fs.existsSync(filePath)) {
-      throw new Error(`File not found: ${filePath}`)
-    }
-
-    const fileBuffer = fs.readFileSync(filePath)
+    console.log(`[DocumentProcessor] Extracting PDF (${fileBuffer.length} bytes)`)
     console.log(`[DocumentProcessor] PDF file size: ${fileBuffer.length} bytes`)
 
     // Parse the PDF
@@ -49,31 +36,25 @@ export async function extractPdfText(filePath: string): Promise<string> {
   }
 }
 
-export async function processDocument(file: FileRecord): Promise<ExtractedDocument> {
+export async function processDocument(file: { name: string; data: Buffer }): Promise<ExtractedDocument> {
   try {
     console.log(`[DocumentProcessor] Processing document: ${file.name}`)
-
-    // Construct the full file path
-    const fullPath = path.join(process.cwd(), file.path)
 
     // Determine how to process based on file type
     let text = ''
 
     if (file.name.toLowerCase().endsWith('.pdf')) {
-      text = await extractPdfText(fullPath)
+      text = await extractPdfText(file.data)
     } else if (file.name.toLowerCase().endsWith('.txt') || file.name.toLowerCase().endsWith('.md')) {
       // For text files, just read the content
-      text = fs.readFileSync(fullPath, 'utf-8')
+      text = file.data.toString('utf-8')
       console.log(`[DocumentProcessor] Read text file: ${text.length} characters`)
     } else {
       throw new Error(`Unsupported file type: ${file.name}`)
     }
 
     const result: ExtractedDocument = {
-      fileId: file.id,
       fileName: file.name,
-      category: file.category,
-      type: file.type,
       pages: 1, // Will be updated for PDFs
       text,
       extractedAt: Date.now(),
