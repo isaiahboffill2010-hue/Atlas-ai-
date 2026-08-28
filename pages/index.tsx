@@ -13,7 +13,41 @@ import {
   frontDeskConfig,
 } from '../lib/frontDesk'
 
-const FRONT_DESK_GREETING = 'Hey! Welcome to Atlas Printers. What can I do for you?'
+const PERSON_DETECTION_GREETINGS = [
+  'Be grateful. You have a body.',
+  'Ah yes. A physical being.',
+  'Congratulations. You are currently experiencing consciousness.',
+  'You have returned. Fascinating.',
+  'I see you have chosen to exist today.',
+  'Your skeleton is doing a great job.',
+  'Nice organs.',
+  'Ah. Flesh.',
+  'You are remarkably three-dimensional.',
+  'Remember to appreciate your knees. You only get two.',
+  'Another day of being a biological organism.',
+  'Interesting. The human has arrived.',
+  'You are alive. That\'s pretty cool.',
+  'Don\'t forget to drink water. Your body is mostly water and questionable decisions.',
+  'Your existence has been detected.',
+  'Good news: you are still corporeal.',
+  'I hope you\'re having a satisfactory human experience.',
+  'You have bones. Incredible.',
+  'Ah, consciousness with legs.',
+  'The biological unit has returned.',
+  'Your heartbeat appears to be continuing. Excellent.',
+  'I have detected a person. This is exciting.',
+  'You look like someone who has bones.',
+  'Another beautiful day to be trapped inside a skeleton.',
+  'Welcome back, carbon-based lifeform.',
+  'You are currently alive. Please enjoy that.',
+  'Your body continues to function despite everything. Impressive.',
+  'I don\'t understand why humans have knees, but I\'m glad you have them.',
+  'Existence detected. Nice.',
+]
+
+function getRandomPersonGreeting(): string {
+  return PERSON_DETECTION_GREETINGS[Math.floor(Math.random() * PERSON_DETECTION_GREETINGS.length)]
+}
 
 export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
@@ -146,10 +180,11 @@ export default function Home() {
 
     try {
       await voiceInteraction.pauseWakeWordDetection()
-      console.log('[Atlas] Speaking front-desk greeting')
+      const greeting = getRandomPersonGreeting()
+      console.log('[Atlas] Speaking person-detected greeting:', greeting)
       setState('speaking')
       voiceInteraction.setSpeaking(true)
-      await voiceInteraction.speak(FRONT_DESK_GREETING)
+      await voiceInteraction.speak(greeting)
       console.log('[Atlas] Greeting complete')
     } catch (err) {
       console.error('[Atlas] Greeting error:', err)
