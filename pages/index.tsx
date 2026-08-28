@@ -248,7 +248,7 @@ export default function Home() {
 
     const shouldStripWakeWord = requestSourceRef.current === 'wake-word'
     requestSourceRef.current = null
-    const cleanedRequest = shouldStripWakeWord ? userRequest.replace(/^\s*hey\s+atlas\s*/i, '').trim() : userRequest.trim()
+    const cleanedRequest = shouldStripWakeWord ? userRequest.replace(/^\s*hey\b\s*/i, '').trim() : userRequest.trim()
 
     if (!cleanedRequest || cleanedRequest.length === 0) {
       console.log('[Atlas] Empty request after cleaning, returning to listening')
