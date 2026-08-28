@@ -4,6 +4,7 @@ import Atlas, { AtlasState } from '../components/Atlas'
 import VoiceInput from '../components/VoiceInput'
 import HamburgerMenu from '../components/HamburgerMenu'
 import Sidebar from '../components/Sidebar'
+import MusicPlayer from '../components/MusicPlayer'
 import { voiceInteraction } from '../lib/voice'
 import { askClaude } from '../lib/claude'
 import { stopSpeaking } from '../lib/tts'
@@ -13,6 +14,8 @@ import {
   FrontDeskDebugState,
   frontDeskConfig,
 } from '../lib/frontDesk'
+import { parseMusicCommand } from '../lib/music/music-command-parser'
+import { handleMusicCommand } from '../lib/music/handle-music-command'
 
 const PERSON_DETECTION_GREETINGS = [
   'Be grateful. You have a body.',
@@ -170,6 +173,12 @@ export default function Home() {
   const handleStopCommandDetected = async () => {
     console.log('[Atlas] Stop command detected, state:', stateRef.current)
 
+    // Always stop music if it's playing
+    if ((window as any).atlasMusic?.stop) {
+      console.log('[Atlas] Stopping music')
+      ;(window as any).atlasMusic.stop()
+    }
+
     if (stateRef.current === 'idle') {
       console.log('[Atlas] Already idle, ignoring stop command')
       return
@@ -259,6 +268,23 @@ export default function Home() {
       return
     }
 
+    // Check for music commands
+    const musicCommand = parseMusicCommand(cleanedRequest)
+    if (musicCommand.command) {
+      console.log('[Atlas] Music command detected:', musicCommand.command)
+      isProcessingRef.current = false
+      setTranscript('')
+
+      try {
+        await handleMusicCommand(musicCommand.command, musicCommand.query)
+        resumeConversationListening()
+      } catch (musicError) {
+        console.error('[Atlas] Music command error:', musicError)
+        resumeConversationListening()
+      }
+      return
+    }
+
       console.log('[Atlas] Transitioning to thinking state')
       setState('thinking')
       setTranscript('')
@@ -343,6 +369,8 @@ export default function Home() {
       </div>
 
       <VoiceInput state={state} transcript={transcript} />
+
+      <MusicPlayer />
 
       <FrontDeskPresenceDetector
         enabled={frontDeskConfig.enabled}
