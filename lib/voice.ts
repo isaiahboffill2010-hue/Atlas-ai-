@@ -15,6 +15,7 @@ interface VoiceCallbacks {
   onTranscript?: (text: string) => void
   onListeningEnded?: (finalTranscript: string) => void
   onError?: (error: string) => void
+  onStopCommandDetected?: () => void
 }
 
 type SpeechRecognitionEvent = any
@@ -52,6 +53,43 @@ function matchesWakeWord(transcript: string): boolean {
   )
 }
 
+function matchesStopCommand(transcript: string): boolean {
+  const normalized = normalizeTranscript(transcript)
+  const stopPhrases = [
+    'stop',
+    'bye',
+    'goodbye',
+    'shut up',
+    'be quiet',
+    'thats enough',
+    "that's enough",
+    'im done',
+    "i'm done",
+    'never mind',
+    'nevermind',
+    'cancel',
+  ]
+
+  // Direct phrase match (entire transcript)
+  if (stopPhrases.includes(normalized)) {
+    return true
+  }
+
+  // Check for standalone phrases at start/end or surrounded by spaces
+  for (const phrase of stopPhrases) {
+    if (
+      normalized === phrase ||
+      normalized.startsWith(phrase + ' ') ||
+      normalized.endsWith(' ' + phrase) ||
+      normalized.includes(' ' + phrase + ' ')
+    ) {
+      return true
+    }
+  }
+
+  return false
+}
+
 class VoiceInteraction {
   private recognition: ISpeechRecognition | null = null
   private requestRecognition: ISpeechRecognition | null = null
@@ -74,6 +112,7 @@ class VoiceInteraction {
   private requestSessionInterimText = ''
   private savedRequestTranscript = ''
   private requestListeningActive = false
+  private shouldIgnorePendingResponse = false
 
   constructor() {
     log('Initializing')
@@ -141,6 +180,13 @@ class VoiceInteraction {
         if (event.results[i].isFinal) {
           this.finalTranscript = transcript
           log(`Heard (final): "${transcript}" [confidence: ${(confidence * 100).toFixed(0)}%]`)
+
+          if (matchesStopCommand(transcript)) {
+            log('✓ Stop command detected during wake word detection')
+            this.stopWakeWordDetection()
+            callbacks.onStopCommandDetected?.()
+            return
+          }
 
           if (matchesWakeWord(transcript)) {
             log('✓ Wake word "Hey" detected - starting request capture')
@@ -392,6 +438,24 @@ class VoiceInteraction {
         const transcript = event.results[i][0].transcript
 
         if (event.results[i].isFinal) {
+          log(`Final request transcript: "${transcript}"`)
+
+          if (matchesStopCommand(transcript)) {
+            log('✓ Stop command detected during request listening')
+            this.clearSilenceTimer()
+            this.requestSessionFinishing = true
+            this.shouldIgnorePendingResponse = true
+            if (this.requestRecognition && this.isListening) {
+              try {
+                ;(this.requestRecognition as any).abort()
+              } catch (e) {
+                // ignore
+              }
+            }
+            callbacks.onStopCommandDetected?.()
+            return
+          }
+
           this.requestTranscript += transcript + ' '
         } else {
           interimText += transcript
@@ -511,6 +575,14 @@ class VoiceInteraction {
   setSpeaking(isSpeaking: boolean) {
     this.isSpeaking = isSpeaking
     log(`Speaking: ${isSpeaking}`)
+  }
+
+  getPendingResponseIgnoreFlag(): boolean {
+    return this.shouldIgnorePendingResponse
+  }
+
+  resetPendingResponseIgnoreFlag() {
+    this.shouldIgnorePendingResponse = false
   }
 
   async speak(text: string, onEnd?: () => void): Promise<void> {

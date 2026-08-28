@@ -6,6 +6,7 @@ import HamburgerMenu from '../components/HamburgerMenu'
 import Sidebar from '../components/Sidebar'
 import { voiceInteraction } from '../lib/voice'
 import { askClaude } from '../lib/claude'
+import { stopSpeaking } from '../lib/tts'
 import FrontDeskPresenceDetector from '../components/FrontDeskPresenceDetector'
 import {
   defaultFrontDeskDebugState,
@@ -106,6 +107,7 @@ export default function Home() {
     console.log('[Atlas] Starting wake word detection')
     voiceInteraction.startWakeWordDetection({
       onWakeWordDetected: handleWakeWordDetected,
+      onStopCommandDetected: handleStopCommandDetected,
       onError: (error) => {
         console.error('[Atlas] Wake word detection error:', error)
         setError(error)
@@ -134,6 +136,7 @@ export default function Home() {
         setError(error)
         handleError()
       },
+      onStopCommandDetected: handleStopCommandDetected,
     }
 
     if (mode === 'wake-word') {
@@ -162,6 +165,46 @@ export default function Home() {
     beginRequestListening('wake-word')
     clearConversationTimeout() // Clear any previous timeout
     resetConversationTimeout() // Start new conversation timeout
+  }
+
+  const handleStopCommandDetected = async () => {
+    console.log('[Atlas] Stop command detected, state:', stateRef.current)
+
+    if (stateRef.current === 'idle') {
+      console.log('[Atlas] Already idle, ignoring stop command')
+      return
+    }
+
+    // Cancel any pending operations
+    isProcessingRef.current = false
+    isConversationActiveRef.current = false
+    requestSourceRef.current = null
+    clearConversationTimeout()
+
+    if (stateRef.current === 'listening') {
+      console.log('[Atlas] Stopping listening')
+      voiceInteraction.endListening()
+    }
+
+    if (stateRef.current === 'speaking') {
+      console.log('[Atlas] Stopping TTS')
+      stopSpeaking()
+      voiceInteraction.setSpeaking(false)
+    }
+
+    if (stateRef.current === 'thinking') {
+      console.log('[Atlas] Cancelling pending response')
+      voiceInteraction.resetPendingResponseIgnoreFlag()
+    }
+
+    console.log('[Atlas] Returning to idle after stop command')
+    setTranscript('')
+    setError(null)
+    setState('idle')
+
+    setTimeout(() => {
+      startWakeWordDetection()
+    }, 300)
   }
 
   const startFrontDeskConversation = async () => {
@@ -224,6 +267,21 @@ export default function Home() {
       console.log('[Atlas] Sending request to Claude:', cleanedRequest)
       const response = await askClaude(cleanedRequest)
       console.log('[Atlas] Got response from Claude:', response)
+
+      // Check if stop command was detected while we were thinking
+      if (voiceInteraction.getPendingResponseIgnoreFlag()) {
+        console.log('[Atlas] Stop command detected during thinking, ignoring response')
+        voiceInteraction.resetPendingResponseIgnoreFlag()
+        isProcessingRef.current = false
+        isConversationActiveRef.current = false
+        setTranscript('')
+        setError(null)
+        setState('idle')
+        setTimeout(() => {
+          startWakeWordDetection()
+        }, 300)
+        return
+      }
 
       console.log('[Atlas] Transitioning to speaking state')
       setState('speaking')
