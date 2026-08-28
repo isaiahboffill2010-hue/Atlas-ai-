@@ -15,11 +15,20 @@ export default function MusicPlayer() {
 
   // Subscribe to music state changes
   useEffect(() => {
+    console.log('[MusicPlayer] Setting up state subscription')
     const unsubscribe = subscribe((newState) => {
+      console.log('[MusicPlayer] State subscription fired')
+      console.log('[MusicPlayer] New state:', newState)
+      console.log('[MusicPlayer] currentSong:', newState.currentSong ? newState.currentSong.title : 'None')
       setMusicState(newState)
     })
 
-    return unsubscribe
+    console.log('[MusicPlayer] Initial state after subscription setup:', musicState)
+
+    return () => {
+      console.log('[MusicPlayer] Unsubscribing from state updates')
+      unsubscribe()
+    }
   }, [])
 
   // Initialize YouTube IFrame API
@@ -266,6 +275,7 @@ export default function MusicPlayer() {
   // Always render the YouTube player container so initialization works
   // But hide the whole player UI if there's no song
   if (!musicState.currentSong) {
+    console.log('[MusicPlayer] No currentSong in state, rendering hidden container only')
     return (
       <>
         {/* Hidden player container - MUST exist for YouTube API */}
@@ -280,6 +290,8 @@ export default function MusicPlayer() {
       </>
     )
   }
+
+  console.log('[MusicPlayer] currentSong exists, rendering full card UI with song:', musicState.currentSong.title)
 
   return (
     <div

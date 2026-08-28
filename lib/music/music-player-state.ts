@@ -32,9 +32,13 @@ export function setMusicPlayerState(newState: MusicPlayerState): void {
 }
 
 export function setCurrentSong(song: CurrentSong | null): void {
-  console.log(`[MusicPlayer] Current song: ${song ? song.title : 'None'}`)
+  const songTitle = song ? song.title : 'None'
+  console.log(`[MusicPlayerState] setCurrentSong("${songTitle}") called`)
+  console.log(`[MusicPlayerState] Song object:`, song)
   musicPlayerStore.currentSong = song
+  console.log(`[MusicPlayerState] ✓ Store updated, notifying ${listeners.length} listeners`)
   notifyListeners()
+  console.log(`[MusicPlayerState] ✓ Listeners notified`)
 }
 
 export function setMusicError(error: string | null): void {
