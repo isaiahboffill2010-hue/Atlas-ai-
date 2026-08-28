@@ -167,7 +167,7 @@ class VoiceInteraction {
     recognition.lang = 'en-US'
 
     recognition.onstart = () => {
-      log('Recognition started (wake-word mode)')
+      log('[DEBUG] ✓ Wake-word recognition started')
       this.isListening = true
     }
 
@@ -210,29 +210,32 @@ class VoiceInteraction {
 
       // Treat "no-speech" as a normal idle/listening condition, not an error
       if (event.error === 'no-speech') {
-        log('No speech detected, will auto-restart')
+        log('[DEBUG] No speech detected in wake-word mode, will auto-restart')
         if (this.mode === 'wake-word' && !this.intentionallyStopping) {
+          log('[DEBUG] Scheduling wake-word restart due to no-speech')
           this.scheduleWakeWordRestart()
         }
         return
       }
 
-      log(`ERROR: ${event.error}`)
+      log(`[DEBUG] Wake-word error: ${event.error}`)
       if (event.error === 'network') {
-        log('Network error')
+        log('[DEBUG] Network error in wake-word mode')
       } else if (event.error === 'aborted') {
-        log('Recognition aborted')
+        log('[DEBUG] Recognition aborted unexpectedly')
+      } else {
+        log('[DEBUG] Other error in wake-word mode, may trigger restart on onend')
       }
       this.callbacks.onError?.(`Speech error: ${event.error}`)
     }
 
     recognition.onend = () => {
-      log('Recognition ended (wake-word mode)')
+      log(`[DEBUG] Recognition ended (wake-word mode), isListening was: ${this.isListening}`)
       this.isListening = false
 
       // Check if we're transitioning to request listening
       if (this.pendingRequestListening) {
-        log('Transitioning from wake-word to request listening')
+        log('[DEBUG] Transitioning from wake-word to request listening')
         const callbacks = this.pendingRequestListening
         this.pendingRequestListening = null
         this.setupRequestListening(callbacks)
@@ -240,8 +243,10 @@ class VoiceInteraction {
       }
 
       if (this.mode === 'wake-word' && !this.intentionallyStopping) {
-        log('Restarting wake-word detection (auto-restart)')
+        log(`[DEBUG] Unexpected recognition end in wake-word mode, scheduling restart. intentionallyStopping: ${this.intentionallyStopping}`)
         this.scheduleWakeWordRestart()
+      } else {
+        log(`[DEBUG] Recognition ended intentionally or mode changed. mode: ${this.mode}, intentionallyStopping: ${this.intentionallyStopping}`)
       }
     }
 
@@ -257,32 +262,49 @@ class VoiceInteraction {
 
   private scheduleWakeWordRestart() {
     this.clearRestartTimer()
+    log(`[DEBUG] Scheduling wake-word restart in 500ms (mode: ${this.mode}, isListening: ${this.isListening})`)
     this.restartTimer = setTimeout(() => {
+      log(`[DEBUG] Wake-word restart timeout fired. Checking: mode: ${this.mode}, isListening: ${this.isListening}`)
       if (this.mode === 'wake-word' && !this.isListening) {
-        log('Auto-restarting wake-word detection')
+        log('[DEBUG] Conditions met, restarting wake-word detection')
         try {
           if (this.recognition) {
+            log('[DEBUG] Calling recognition.start()')
             this.recognition.start()
+            log('[DEBUG] recognition.start() call completed')
+          } else {
+            log('[DEBUG] ERROR: recognition is null!')
           }
         } catch (e) {
-          log(`ERROR: Failed to restart: ${e}`)
+          log(`[DEBUG] ERROR: Failed to restart: ${e}`)
         }
+      } else {
+        log(`[DEBUG] Conditions NOT met for restart. mode: ${this.mode}, isListening: ${this.isListening}`)
       }
     }, 500)
   }
 
   private scheduleRequestListeningRestart() {
     this.clearRequestRestartTimer()
+    log(`[DEBUG] Scheduling request listening restart in 300ms (mode: ${this.mode}, isListening: ${this.isListening}, requestListeningActive: ${this.requestListeningActive})`)
     this.requestRestartTimer = setTimeout(() => {
+      log('[DEBUG] Request listening restart timeout fired. Checking conditions...')
+      log(`[DEBUG] mode: ${this.mode}, isListening: ${this.isListening}, requestListeningActive: ${this.requestListeningActive}, requestSessionFinishing: ${this.requestSessionFinishing}`)
       if (this.mode === 'request' && !this.isListening && this.requestListeningActive && !this.requestSessionFinishing) {
-        log('Browser stopped listening, auto-restarting request listening to keep mic active')
+        log('[DEBUG] Conditions met, restarting request listening')
         try {
           if (this.requestRecognition) {
+            log('[DEBUG] Calling requestRecognition.start()')
             this.requestRecognition.start()
+            log('[DEBUG] requestRecognition.start() call completed')
+          } else {
+            log('[DEBUG] ERROR: requestRecognition is null!')
           }
         } catch (e) {
-          log(`ERROR: Failed to restart request listening: ${e}`)
+          log(`[DEBUG] ERROR: Failed to restart request listening: ${e}`)
         }
+      } else {
+        log('[DEBUG] Conditions NOT met for request restart')
       }
     }, 300)
   }
@@ -420,9 +442,12 @@ class VoiceInteraction {
 
     recognition.onstart = () => {
       // Ignore if this is a stale session
-      if (sessionId !== this.currentRequestSessionId) return
+      if (sessionId !== this.currentRequestSessionId) {
+        log('[DEBUG] Request onstart: stale session, ignoring')
+        return
+      }
 
-      log('Starting request capture')
+      log(`[DEBUG] ✓ Request capture started (sessionId: ${sessionId})`)
       this.isListening = true
       // Reset transcript when request recognition actually starts
       this.requestTranscript = ''
@@ -474,25 +499,34 @@ class VoiceInteraction {
 
     recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       // Ignore if this is a stale session
-      if (sessionId !== this.currentRequestSessionId) return
-
-      // Don't report intentional aborts or "no-speech" errors
-      if (this.requestSessionFinishing && event.error === 'aborted') {
-        log('Request recognition aborted (intentional)')
+      if (sessionId !== this.currentRequestSessionId) {
+        log('[DEBUG] Request onerror: stale session, ignoring')
         return
       }
 
-      log(`ERROR during request capture: ${event.error}`)
-      if (event.error !== 'no-speech') {
+      // Don't report intentional aborts or "no-speech" errors
+      if (this.requestSessionFinishing && event.error === 'aborted') {
+        log('[DEBUG] Request recognition aborted (intentional)')
+        return
+      }
+
+      log(`[DEBUG] Error during request capture: ${event.error}`)
+      if (event.error === 'no-speech') {
+        log('[DEBUG] No speech detected during request - likely will end recognition, onend will handle restart')
+      } else {
+        log(`[DEBUG] Other error during request: ${event.error}`)
         this.callbacks.onError?.(`Speech error: ${event.error}`)
       }
     }
 
     recognition.onend = () => {
       // Ignore if this is a stale session
-      if (sessionId !== this.currentRequestSessionId) return
+      if (sessionId !== this.currentRequestSessionId) {
+        log(`[DEBUG] Request onend: stale session (current: ${this.currentRequestSessionId}, got: ${sessionId}), ignoring`)
+        return
+      }
 
-      log('Recognition ended (request mode)')
+      log(`[DEBUG] Recognition ended (request mode), isListening was: ${this.isListening}`)
       this.isListening = false
       this.clearSilenceTimer()
       this.requestRecognition = null
@@ -500,7 +534,7 @@ class VoiceInteraction {
       // If we were finishing, now call the callback with the final transcript
       if (this.requestSessionFinishing) {
         const transcript = this.savedRequestTranscript.trim()
-        log(`Request transcript: "${transcript}"`)
+        log(`[DEBUG] Request session finished with transcript: "${transcript}"`)
         this.callbacks.onListeningEnded?.(transcript)
 
         // Clean up after callback has been invoked
@@ -511,8 +545,11 @@ class VoiceInteraction {
       } else if (this.requestListeningActive && !this.isSpeaking) {
         // Browser stopped listening unexpectedly while we're still in request mode
         // Schedule auto-restart to keep the mic active
-        log('Request listening ended unexpectedly, scheduling restart to keep mic active')
+        log(`[DEBUG] Request listening ended unexpectedly while still active. isSpeaking: ${this.isSpeaking}, requestListeningActive: ${this.requestListeningActive}`)
+        log('[DEBUG] Scheduling request listening restart')
         this.scheduleRequestListeningRestart()
+      } else {
+        log(`[DEBUG] Request listening ended: requestListeningActive: ${this.requestListeningActive}, isSpeaking: ${this.isSpeaking}, requestSessionFinishing: ${this.requestSessionFinishing}`)
       }
     }
 
