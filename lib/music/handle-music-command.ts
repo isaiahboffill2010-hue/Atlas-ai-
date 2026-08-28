@@ -113,6 +113,33 @@ export async function handleMusicCommand(command: MusicCommand, query?: string):
         return true
       }
 
+      case 'replay': {
+        console.log('[Music] Replay command: restarting current song from beginning')
+        setMusicError(null)
+
+        // Check if there's a current song to replay
+        const currentState = (window as any).atlasMusic?.getState?.()
+        if (!currentState?.currentSong) {
+          console.log('[Music] No song to replay, returning error')
+          setMusicError("There's nothing to replay.")
+          return false
+        }
+
+        console.log(`[Music] Replaying: ${currentState.currentSong.title}`)
+
+        if ((window as any).atlasMusic?.replay) {
+          console.log('[Music] Calling atlasMusic.replay()')
+          ;(window as any).atlasMusic.replay()
+          console.log('[Music] ✓ Replay initiated (seekTo + playVideo)')
+        } else {
+          console.error('[Music] ✗ atlasMusic.replay not available')
+          setMusicError('Music player replay not available')
+          return false
+        }
+
+        return true
+      }
+
       default:
         return false
     }

@@ -1,4 +1,4 @@
-export type MusicCommand = 'play' | 'pause' | 'resume' | 'stop' | null
+export type MusicCommand = 'play' | 'pause' | 'resume' | 'stop' | 'replay' | null
 
 export interface ParsedMusicCommand {
   command: MusicCommand
@@ -23,6 +23,11 @@ const RESUME_PATTERNS = [
   /^play\s+again$/i,
   /^keep\s+playing$/i,
   /^unpause$/i,
+]
+
+const REPLAY_PATTERNS = [
+  /^replay(\s+the\s+song)?$/i,
+  /^restart(\s+the\s+song)?$/i,
 ]
 
 const STOP_PATTERNS = [
@@ -51,6 +56,14 @@ export function parseMusicCommand(transcript: string): ParsedMusicCommand {
     if (pattern.test(normalized)) {
       console.log(`[Music] Pause command detected`)
       return { command: 'pause' }
+    }
+  }
+
+  // Check for replay command (BEFORE resume, so it doesn't get caught)
+  for (const pattern of REPLAY_PATTERNS) {
+    if (pattern.test(normalized)) {
+      console.log(`[Music] Replay command detected`)
+      return { command: 'replay' }
     }
   }
 

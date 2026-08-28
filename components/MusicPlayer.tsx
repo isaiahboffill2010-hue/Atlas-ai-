@@ -285,12 +285,32 @@ export default function MusicPlayer() {
     }
   }
 
+  const replayMusic = () => {
+    console.log('[MusicPlayer] replayMusic() called')
+    if (!playerRef.current) {
+      console.error('[MusicPlayer] ✗ No player available to replay')
+      return
+    }
+
+    try {
+      console.log('[MusicPlayer] Seeking to 0:00 (seekTo(0, true))')
+      playerRef.current.seekTo(0, true)
+
+      console.log('[MusicPlayer] Calling playVideo() to start from beginning')
+      playerRef.current.playVideo()
+      console.log('[MusicPlayer] ✓ Replay initiated - seeked to 0:00 and called playVideo()')
+    } catch (error) {
+      console.error('[MusicPlayer] Error replaying video:', error)
+    }
+  }
+
   // Expose control methods globally for voice system
   useEffect(() => {
     ;(window as any).atlasMusic = {
       play: playVideo,
       pause: pauseMusic,
       resume: resumeMusic,
+      replay: replayMusic,
       stop: stopMusic,
       getState: () => getMusicPlayerState(),
     }
