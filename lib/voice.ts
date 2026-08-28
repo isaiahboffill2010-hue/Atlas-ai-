@@ -113,6 +113,8 @@ class VoiceInteraction {
   private savedRequestTranscript = ''
   private requestListeningActive = false
   private shouldIgnorePendingResponse = false
+  private isWakeWordRestartPending = false
+  private isRequestRestartPending = false
 
   constructor() {
     log('Initializing')
@@ -261,9 +263,17 @@ class VoiceInteraction {
   }
 
   private scheduleWakeWordRestart() {
+    // Prevent multiple concurrent restart attempts
+    if (this.isWakeWordRestartPending) {
+      log('[DEBUG] Wake-word restart already pending, skipping duplicate schedule')
+      return
+    }
+
     this.clearRestartTimer()
+    this.isWakeWordRestartPending = true
     log(`[DEBUG] Scheduling wake-word restart in 500ms (mode: ${this.mode}, isListening: ${this.isListening})`)
     this.restartTimer = setTimeout(() => {
+      this.isWakeWordRestartPending = false
       log(`[DEBUG] Wake-word restart timeout fired. Checking: mode: ${this.mode}, isListening: ${this.isListening}`)
       if (this.mode === 'wake-word' && !this.isListening) {
         log('[DEBUG] Conditions met, restarting wake-word detection')
@@ -285,9 +295,17 @@ class VoiceInteraction {
   }
 
   private scheduleRequestListeningRestart() {
+    // Prevent multiple concurrent restart attempts
+    if (this.isRequestRestartPending) {
+      log('[DEBUG] Request restart already pending, skipping duplicate schedule')
+      return
+    }
+
     this.clearRequestRestartTimer()
+    this.isRequestRestartPending = true
     log(`[DEBUG] Scheduling request listening restart in 300ms (mode: ${this.mode}, isListening: ${this.isListening}, requestListeningActive: ${this.requestListeningActive})`)
     this.requestRestartTimer = setTimeout(() => {
+      this.isRequestRestartPending = false
       log('[DEBUG] Request listening restart timeout fired. Checking conditions...')
       log(`[DEBUG] mode: ${this.mode}, isListening: ${this.isListening}, requestListeningActive: ${this.requestListeningActive}, requestSessionFinishing: ${this.requestSessionFinishing}`)
       if (this.mode === 'request' && !this.isListening && this.requestListeningActive && !this.requestSessionFinishing) {
@@ -326,6 +344,7 @@ class VoiceInteraction {
   private stopWakeWordDetection() {
     log('Stopping wake-word detection')
     this.clearRestartTimer()
+    this.isWakeWordRestartPending = false
     this.intentionallyStopping = true
     this.mode = null
     if (this.recognition && this.isListening) {
@@ -582,6 +601,7 @@ class VoiceInteraction {
     log('Silence timeout reached')
     this.clearSilenceTimer()
     this.clearRequestRestartTimer()
+    this.isRequestRestartPending = false
 
     // Capture the final transcript BEFORE aborting (includes interim results)
     const finalTranscript = this.requestTranscript + this.requestSessionInterimText
@@ -641,6 +661,8 @@ class VoiceInteraction {
     this.clearSilenceTimer()
     this.clearRestartTimer()
     this.clearRequestRestartTimer()
+    this.isWakeWordRestartPending = false
+    this.isRequestRestartPending = false
     this.mode = null
     this.requestListeningActive = false
 
