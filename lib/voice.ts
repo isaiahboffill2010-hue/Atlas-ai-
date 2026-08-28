@@ -311,12 +311,17 @@ class VoiceInteraction {
       if (this.mode === 'request' && !this.isListening && this.requestListeningActive && !this.requestSessionFinishing) {
         log('[DEBUG] Conditions met, restarting request listening')
         try {
+          if (!this.requestRecognition) {
+            log('[DEBUG] requestRecognition is null, recreating it...')
+            this.recreateRequestRecognitionForRestart()
+          }
+
           if (this.requestRecognition) {
             log('[DEBUG] Calling requestRecognition.start()')
             this.requestRecognition.start()
             log('[DEBUG] requestRecognition.start() call completed')
           } else {
-            log('[DEBUG] ERROR: requestRecognition is null!')
+            log('[DEBUG] ERROR: requestRecognition is still null after recreation!')
           }
         } catch (e) {
           log(`[DEBUG] ERROR: Failed to restart request listening: ${e}`)
@@ -325,6 +330,141 @@ class VoiceInteraction {
         log('[DEBUG] Conditions NOT met for request restart')
       }
     }, 300)
+  }
+
+  private recreateRequestRecognitionForRestart() {
+    log('[DEBUG] Recreating request recognition instance for restart')
+
+    // Get current session ID to ensure we use the right session
+    const sessionId = this.currentRequestSessionId
+    const callbacks = this.callbacks
+
+    // Create a fresh recognition instance
+    const SpeechRecognition =
+      typeof window !== 'undefined'
+        ? (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition
+        : null
+
+    if (!SpeechRecognition) {
+      log('[DEBUG] ERROR: SpeechRecognition not available for recreation')
+      return
+    }
+
+    log(`[DEBUG] Creating new recognition instance (sessionId: ${sessionId})`)
+    const recognition = new SpeechRecognition()
+    this.requestRecognition = recognition
+
+    this.mode = 'request'
+
+    recognition.continuous = true
+    recognition.interimResults = true
+    recognition.lang = 'en-US'
+
+    recognition.onstart = () => {
+      // Ignore if this is a stale session
+      if (sessionId !== this.currentRequestSessionId) {
+        log('[DEBUG] Request onstart: stale session (recreated), ignoring')
+        return
+      }
+      log(`[DEBUG] ✓ Request capture restarted (sessionId: ${sessionId})`)
+      this.isListening = true
+      this.requestTranscript = ''
+      callbacks.onListeningStarted?.()
+    }
+
+    recognition.onresult = (event: SpeechRecognitionEvent) => {
+      // Ignore if this is a stale session
+      if (sessionId !== this.currentRequestSessionId) return
+
+      let interimText = ''
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const transcript = event.results[i][0].transcript
+
+        if (event.results[i].isFinal) {
+          log(`[DEBUG] Final request transcript (recreated): "${transcript}"`)
+
+          if (matchesStopCommand(transcript)) {
+            log('[DEBUG] Stop command detected during recreated request listening')
+            this.clearSilenceTimer()
+            this.requestSessionFinishing = true
+            this.shouldIgnorePendingResponse = true
+            if (this.requestRecognition && this.isListening) {
+              try {
+                ;(this.requestRecognition as any).abort()
+              } catch (e) {
+                // ignore
+              }
+            }
+            callbacks.onStopCommandDetected?.()
+            return
+          }
+
+          this.requestTranscript += transcript + ' '
+        } else {
+          interimText += transcript
+        }
+      }
+
+      this.requestSessionInterimText = interimText
+      const currentTranscript = this.requestTranscript + interimText
+      log(`[DEBUG] Transcript (recreated): "${currentTranscript}"`)
+      callbacks.onTranscript?.(currentTranscript)
+
+      this.resetSilenceTimer()
+    }
+
+    recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
+      // Ignore if this is a stale session
+      if (sessionId !== this.currentRequestSessionId) {
+        log('[DEBUG] Request onerror (recreated): stale session, ignoring')
+        return
+      }
+
+      // Don't report intentional aborts or "no-speech" errors
+      if (this.requestSessionFinishing && event.error === 'aborted') {
+        log('[DEBUG] Request recognition aborted (intentional, recreated)')
+        return
+      }
+
+      log(`[DEBUG] Error during recreated request capture: ${event.error}`)
+      if (event.error === 'no-speech') {
+        log('[DEBUG] No speech detected during recreated request - will handle in onend')
+      } else {
+        log(`[DEBUG] Other error during recreated request: ${event.error}`)
+        callbacks.onError?.(`Speech error: ${event.error}`)
+      }
+    }
+
+    recognition.onend = () => {
+      // Ignore if this is a stale session
+      if (sessionId !== this.currentRequestSessionId) {
+        log(`[DEBUG] Request onend (recreated): stale session, ignoring`)
+        return
+      }
+
+      log(`[DEBUG] Recreated recognition ended, isListening was: ${this.isListening}`)
+      this.isListening = false
+      this.clearSilenceTimer()
+      this.requestRecognition = null
+
+      // If we were finishing, call the callback with final transcript
+      if (this.requestSessionFinishing) {
+        const transcript = this.savedRequestTranscript.trim()
+        log(`[DEBUG] Recreated request session finished with transcript: "${transcript}"`)
+        callbacks.onListeningEnded?.(transcript)
+
+        // Clean up
+        this.savedRequestTranscript = ''
+        this.requestSessionInterimText = ''
+        this.requestTranscript = ''
+        this.requestListeningActive = false
+      } else if (this.requestListeningActive && !this.isSpeaking) {
+        log(`[DEBUG] Recreated request listening ended unexpectedly while still active`)
+        this.scheduleRequestListeningRestart()
+      }
+    }
+
+    log('[DEBUG] Request recognition recreated with all handlers')
   }
 
   private clearRestartTimer() {
