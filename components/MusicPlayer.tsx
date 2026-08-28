@@ -4,12 +4,14 @@ import {
   subscribe,
   MusicPlayerStore,
   setMusicPlayerState,
+  setMusicError,
 } from '../lib/music/music-player-state'
 
 export default function MusicPlayer() {
   const [musicState, setMusicState] = useState<MusicPlayerStore>(getMusicPlayerState())
-  const iframeRef = useRef<HTMLIFrameElement>(null)
   const playerRef = useRef<any>(null)
+  const playerReadyRef = useRef(false)
+  const pendingVideoRef = useRef<string | null>(null)
 
   // Subscribe to music state changes
   useEffect(() => {
@@ -24,38 +26,94 @@ export default function MusicPlayer() {
   useEffect(() => {
     if (typeof window === 'undefined') return
 
-    // Load YouTube IFrame API
+    console.log('[MusicPlayer] Initializing YouTube IFrame API')
+
+    // Load YouTube IFrame API script
     if (!(window as any).YT) {
+      console.log('[MusicPlayer] YouTube API not loaded, loading script')
       const tag = document.createElement('script')
       tag.src = 'https://www.youtube.com/iframe_api'
       const firstScriptTag = document.getElementsByTagName('script')[0]
       if (firstScriptTag && firstScriptTag.parentNode) {
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
       }
+    } else {
+      console.log('[MusicPlayer] YouTube API already loaded')
+      initializePlayer()
     }
 
-    // Define onYouTubeIframeAPIReady
+    // Define global callback for YouTube API to call when ready
     ;(window as any).onYouTubeIframeAPIReady = () => {
+      console.log('[MusicPlayer] onYouTubeIframeAPIReady callback fired')
       initializePlayer()
+    }
+
+    return () => {
+      console.log('[MusicPlayer] Cleaning up YouTube player')
+      if (playerRef.current) {
+        try {
+          playerRef.current.destroy?.()
+        } catch (e) {
+          console.error('[MusicPlayer] Error destroying player:', e)
+        }
+      }
     }
   }, [])
 
   const initializePlayer = () => {
-    if (typeof (window as any).YT === 'undefined') return
+    if (playerReadyRef.current) {
+      console.log('[MusicPlayer] Player already initialized')
+      return
+    }
 
-    playerRef.current = new (window as any).YT.Player('youtube-player', {
-      height: '0',
-      width: '0',
-      videoId: '',
-      events: {
-        onReady: onPlayerReady,
-        onStateChange: onPlayerStateChange,
-      },
-    })
+    if (typeof (window as any).YT === 'undefined') {
+      console.error('[MusicPlayer] YouTube API not available')
+      return
+    }
+
+    console.log('[MusicPlayer] Creating YT.Player instance')
+
+    try {
+      playerRef.current = new (window as any).YT.Player('youtube-player', {
+        height: '315',
+        width: '560',
+        videoId: '',
+        events: {
+          onReady: onPlayerReady,
+          onStateChange: onPlayerStateChange,
+          onError: onPlayerError,
+        },
+      })
+      console.log('[MusicPlayer] YT.Player instance created successfully')
+    } catch (error) {
+      console.error('[MusicPlayer] Error creating player:', error)
+    }
   }
 
   const onPlayerReady = () => {
-    console.log('[MusicPlayer] YouTube player ready')
+    console.log('[MusicPlayer] YouTube player ready event fired')
+    playerReadyRef.current = true
+
+    // If there's a pending video, play it now
+    if (pendingVideoRef.current) {
+      console.log('[MusicPlayer] Playing pending video:', pendingVideoRef.current)
+      const videoId = pendingVideoRef.current
+      pendingVideoRef.current = null
+      playVideo(videoId)
+    }
+  }
+
+  const onPlayerError = (event: any) => {
+    console.error('[MusicPlayer] YouTube player error:', event.data)
+    const errorCodes: Record<number, string> = {
+      2: 'Invalid parameter',
+      5: 'HTML5 player error',
+      100: 'Video not found',
+      101: 'Video not allowed to be played',
+      150: 'Same as 101',
+    }
+    const errorMsg = errorCodes[event.data] || `Error code ${event.data}`
+    setMusicError(`YouTube error: ${errorMsg}`)
   }
 
   const onPlayerStateChange = (event: any) => {
@@ -91,13 +149,22 @@ export default function MusicPlayer() {
   }
 
   const playVideo = (videoId: string) => {
+    console.log(`[MusicPlayer] playVideo called with: ${videoId}`)
+
+    if (!playerReadyRef.current) {
+      console.log('[MusicPlayer] Player not ready, queueing video:', videoId)
+      pendingVideoRef.current = videoId
+      return
+    }
+
     if (!playerRef.current) {
-      console.error('[MusicPlayer] Player not initialized')
+      console.error('[MusicPlayer] Player ref is null despite ready flag')
+      setMusicError('Music player not initialized')
       return
     }
 
     try {
-      console.log(`[MusicPlayer] Loading and playing video: ${videoId}`)
+      console.log(`[MusicPlayer] Loading video: ${videoId}`)
       playerRef.current.loadVideoById(videoId)
 
       // Call playVideo() to actually start playback
@@ -105,16 +172,22 @@ export default function MusicPlayer() {
       setTimeout(() => {
         try {
           console.log('[MusicPlayer] Calling playVideo()')
-          playerRef.current.playVideo()
+          if (playerRef.current?.playVideo) {
+            playerRef.current.playVideo()
+            console.log('[MusicPlayer] playVideo() called successfully')
+          } else {
+            console.error('[MusicPlayer] playVideo method not available')
+          }
         } catch (error) {
           console.error('[MusicPlayer] Error calling playVideo():', error)
+          setMusicError(`Playback error: ${error instanceof Error ? error.message : 'Unknown'}`)
         }
       }, 100)
 
-      // Don't set state to playing yet - wait for YouTube to report it
       console.log('[MusicPlayer] Playback initiated, waiting for YouTube state confirmation')
     } catch (error) {
       console.error('[MusicPlayer] Error loading video:', error)
+      setMusicError(`Failed to load video: ${error instanceof Error ? error.message : 'Unknown'}`)
     }
   }
 
@@ -161,7 +234,7 @@ export default function MusicPlayer() {
         borderRadius: '12px',
         padding: '16px',
         minWidth: '300px',
-        maxWidth: '400px',
+        maxWidth: '600px',
         border: '1px solid rgba(100, 200, 255, 0.3)',
         boxShadow: '0 8px 24px rgba(0, 0, 0, 0.4)',
         zIndex: 100,
@@ -169,8 +242,16 @@ export default function MusicPlayer() {
         color: '#fff',
       }}
     >
-      {/* Hidden YouTube Player */}
-      <div id="youtube-player" style={{ display: 'none' }} />
+      {/* YouTube Player - Visible for debugging */}
+      <div
+        id="youtube-player"
+        style={{
+          width: '100%',
+          marginBottom: '12px',
+          borderRadius: '8px',
+          overflow: 'hidden',
+        }}
+      />
 
       {/* Song Title */}
       <div
