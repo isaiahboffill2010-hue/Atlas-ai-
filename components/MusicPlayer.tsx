@@ -62,15 +62,31 @@ export default function MusicPlayer() {
     const YT = (window as any).YT
     const state = event.data
 
+    const stateMap: Record<number, string> = {
+      [-1]: 'UNSTARTED',
+      [0]: 'ENDED',
+      [1]: 'PLAYING',
+      [2]: 'PAUSED',
+      [3]: 'BUFFERING',
+      [5]: 'CUED',
+    }
+
+    const stateName = stateMap[state] || 'UNKNOWN'
+    console.log(`[MusicPlayer] YouTube state changed: ${stateName} (${state})`)
+
     if (state === YT.PlayerState.PLAYING) {
-      console.log('[MusicPlayer] Playing')
+      console.log('[MusicPlayer] ✓ Audio playback started')
       setMusicPlayerState('playing')
     } else if (state === YT.PlayerState.PAUSED) {
-      console.log('[MusicPlayer] Paused')
+      console.log('[MusicPlayer] Audio paused')
       setMusicPlayerState('paused')
     } else if (state === YT.PlayerState.ENDED) {
-      console.log('[MusicPlayer] Ended')
+      console.log('[MusicPlayer] Audio ended')
       setMusicPlayerState('stopped')
+    } else if (state === YT.PlayerState.BUFFERING) {
+      console.log('[MusicPlayer] Audio buffering...')
+    } else if (state === YT.PlayerState.UNSTARTED || state === YT.PlayerState.CUED) {
+      console.log('[MusicPlayer] Video ready but not playing - autoplay may be blocked')
     }
   }
 
@@ -81,9 +97,22 @@ export default function MusicPlayer() {
     }
 
     try {
-      console.log(`[MusicPlayer] Loading video: ${videoId}`)
+      console.log(`[MusicPlayer] Loading and playing video: ${videoId}`)
       playerRef.current.loadVideoById(videoId)
-      setMusicPlayerState('playing')
+
+      // Call playVideo() to actually start playback
+      // Small delay to ensure video is loaded before playing
+      setTimeout(() => {
+        try {
+          console.log('[MusicPlayer] Calling playVideo()')
+          playerRef.current.playVideo()
+        } catch (error) {
+          console.error('[MusicPlayer] Error calling playVideo():', error)
+        }
+      }, 100)
+
+      // Don't set state to playing yet - wait for YouTube to report it
+      console.log('[MusicPlayer] Playback initiated, waiting for YouTube state confirmation')
     } catch (error) {
       console.error('[MusicPlayer] Error loading video:', error)
     }

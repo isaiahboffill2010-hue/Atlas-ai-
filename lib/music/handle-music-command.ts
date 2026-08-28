@@ -38,13 +38,16 @@ export async function handleMusicCommand(command: MusicCommand, query?: string):
           return false
         }
 
-        // Set current song and play
+        // Set current song (don't set playing state yet - wait for YouTube to report it)
         setCurrentSong(result.result)
-        setMusicPlayerState('playing')
 
-        // Tell player to play
+        // Tell player to play - playback state will be set by YouTube's state change event
         if ((window as any).atlasMusic?.play) {
           ;(window as any).atlasMusic.play(result.result.videoId)
+        } else {
+          console.error('[Music] atlasMusic.play not available')
+          setMusicError('Music player not available')
+          return false
         }
 
         return true
