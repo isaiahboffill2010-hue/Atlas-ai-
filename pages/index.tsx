@@ -78,7 +78,7 @@ export default function Home() {
       setState('idle')
       setTranscript('')
       startWakeWordDetection()
-    }, 8000) // 8 seconds
+    }, 15000) // 15 seconds
   }
 
   const clearConversationTimeout = () => {
