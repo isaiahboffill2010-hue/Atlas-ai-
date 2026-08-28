@@ -24,54 +24,87 @@ export default function MusicPlayer() {
 
   // Initialize YouTube IFrame API
   useEffect(() => {
-    if (typeof window === 'undefined') return
+    if (typeof window === 'undefined') {
+      console.log('[MusicPlayer] SSR detected, skipping YouTube initialization')
+      return
+    }
 
-    console.log('[MusicPlayer] Initializing YouTube IFrame API')
+    console.log('[MusicPlayer] Component mounted, starting YouTube API initialization')
+
+    // Define global callback FIRST before loading script
+    ;(window as any).onYouTubeIframeAPIReady = () => {
+      console.log('[MusicPlayer] ✓ onYouTubeIframeAPIReady callback fired')
+      initializePlayer()
+    }
 
     // Load YouTube IFrame API script
     if (!(window as any).YT) {
-      console.log('[MusicPlayer] YouTube API not loaded, loading script')
+      console.log('[MusicPlayer] YouTube API not loaded, loading script from https://www.youtube.com/iframe_api')
       const tag = document.createElement('script')
       tag.src = 'https://www.youtube.com/iframe_api'
+      tag.async = true
+      tag.onload = () => {
+        console.log('[MusicPlayer] YouTube script loaded, waiting for API ready...')
+      }
+      tag.onerror = () => {
+        console.error('[MusicPlayer] Failed to load YouTube script')
+      }
       const firstScriptTag = document.getElementsByTagName('script')[0]
       if (firstScriptTag && firstScriptTag.parentNode) {
         firstScriptTag.parentNode.insertBefore(tag, firstScriptTag)
       }
     } else {
-      console.log('[MusicPlayer] YouTube API already loaded')
-      initializePlayer()
-    }
-
-    // Define global callback for YouTube API to call when ready
-    ;(window as any).onYouTubeIframeAPIReady = () => {
-      console.log('[MusicPlayer] onYouTubeIframeAPIReady callback fired')
-      initializePlayer()
+      console.log('[MusicPlayer] YouTube API already loaded, initializing player immediately')
+      // Give DOM a chance to render the container
+      setTimeout(() => {
+        initializePlayer()
+      }, 100)
     }
 
     return () => {
-      console.log('[MusicPlayer] Cleaning up YouTube player')
+      console.log('[MusicPlayer] Component unmounting, cleaning up')
       if (playerRef.current) {
         try {
           playerRef.current.destroy?.()
+          console.log('[MusicPlayer] Player destroyed')
         } catch (e) {
           console.error('[MusicPlayer] Error destroying player:', e)
         }
       }
+      playerReadyRef.current = false
+      pendingVideoRef.current = null
     }
   }, [])
 
   const initializePlayer = () => {
     if (playerReadyRef.current) {
-      console.log('[MusicPlayer] Player already initialized')
+      console.log('[MusicPlayer] Player already initialized, skipping')
       return
     }
+
+    console.log('[MusicPlayer] initializePlayer() called')
 
     if (typeof (window as any).YT === 'undefined') {
-      console.error('[MusicPlayer] YouTube API not available')
+      console.error('[MusicPlayer] ✗ YouTube API not available, retrying in 100ms')
+      setTimeout(() => {
+        initializePlayer()
+      }, 100)
       return
     }
 
-    console.log('[MusicPlayer] Creating YT.Player instance')
+    // Check if container exists
+    const container = document.getElementById('youtube-player')
+    if (!container) {
+      console.error('[MusicPlayer] ✗ Container element "youtube-player" not found in DOM, retrying in 100ms')
+      console.log('[MusicPlayer] Available elements:', document.body.innerHTML.substring(0, 200))
+      setTimeout(() => {
+        initializePlayer()
+      }, 100)
+      return
+    }
+
+    console.log('[MusicPlayer] ✓ YouTube API available, container found, creating YT.Player instance')
+    console.log('[MusicPlayer] Container:', container)
 
     try {
       playerRef.current = new (window as any).YT.Player('youtube-player', {
@@ -84,22 +117,30 @@ export default function MusicPlayer() {
           onError: onPlayerError,
         },
       })
-      console.log('[MusicPlayer] YT.Player instance created successfully')
+      console.log('[MusicPlayer] ✓ YT.Player instance created successfully')
+      console.log('[MusicPlayer] playerRef.current:', playerRef.current)
     } catch (error) {
-      console.error('[MusicPlayer] Error creating player:', error)
+      console.error('[MusicPlayer] ✗ Error creating player:', error)
+      if (error instanceof Error) {
+        console.error('[MusicPlayer] Error details:', error.message)
+      }
     }
   }
 
-  const onPlayerReady = () => {
-    console.log('[MusicPlayer] YouTube player ready event fired')
+  const onPlayerReady = (event: any) => {
+    console.log('[MusicPlayer] ✓ YouTube player onReady event fired')
+    console.log('[MusicPlayer] Player ready event object:', event)
     playerReadyRef.current = true
+    console.log('[MusicPlayer] ✓ Set playerReadyRef = true')
 
     // If there's a pending video, play it now
     if (pendingVideoRef.current) {
-      console.log('[MusicPlayer] Playing pending video:', pendingVideoRef.current)
       const videoId = pendingVideoRef.current
+      console.log('[MusicPlayer] ✓ Found pending video, playing:', videoId)
       pendingVideoRef.current = null
       playVideo(videoId)
+    } else {
+      console.log('[MusicPlayer] No pending video in queue')
     }
   }
 
@@ -149,44 +190,46 @@ export default function MusicPlayer() {
   }
 
   const playVideo = (videoId: string) => {
-    console.log(`[MusicPlayer] playVideo called with: ${videoId}`)
+    console.log(`[MusicPlayer] playVideo(${videoId}) called`)
+    console.log(`[MusicPlayer] playerReadyRef.current = ${playerReadyRef.current}`)
 
     if (!playerReadyRef.current) {
-      console.log('[MusicPlayer] Player not ready, queueing video:', videoId)
+      console.log(`[MusicPlayer] ⏳ Player not ready yet, queueing video: ${videoId}`)
       pendingVideoRef.current = videoId
       return
     }
 
     if (!playerRef.current) {
-      console.error('[MusicPlayer] Player ref is null despite ready flag')
+      console.error('[MusicPlayer] ✗ Player ref is null despite playerReadyRef=true!')
       setMusicError('Music player not initialized')
       return
     }
 
     try {
-      console.log(`[MusicPlayer] Loading video: ${videoId}`)
+      console.log(`[MusicPlayer] ✓ Player ready, loading video: ${videoId}`)
       playerRef.current.loadVideoById(videoId)
+      console.log(`[MusicPlayer] ✓ loadVideoById(${videoId}) called`)
 
       // Call playVideo() to actually start playback
       // Small delay to ensure video is loaded before playing
       setTimeout(() => {
         try {
-          console.log('[MusicPlayer] Calling playVideo()')
+          console.log('[MusicPlayer] Calling playVideo()...')
           if (playerRef.current?.playVideo) {
             playerRef.current.playVideo()
-            console.log('[MusicPlayer] playVideo() called successfully')
+            console.log('[MusicPlayer] ✓ playVideo() called successfully')
           } else {
-            console.error('[MusicPlayer] playVideo method not available')
+            console.error('[MusicPlayer] ✗ playVideo method not available on player')
           }
         } catch (error) {
-          console.error('[MusicPlayer] Error calling playVideo():', error)
+          console.error('[MusicPlayer] ✗ Error calling playVideo():', error)
           setMusicError(`Playback error: ${error instanceof Error ? error.message : 'Unknown'}`)
         }
       }, 100)
 
       console.log('[MusicPlayer] Playback initiated, waiting for YouTube state confirmation')
     } catch (error) {
-      console.error('[MusicPlayer] Error loading video:', error)
+      console.error('[MusicPlayer] ✗ Error loading video:', error)
       setMusicError(`Failed to load video: ${error instanceof Error ? error.message : 'Unknown'}`)
     }
   }
@@ -220,8 +263,22 @@ export default function MusicPlayer() {
     }
   }, [])
 
+  // Always render the YouTube player container so initialization works
+  // But hide the whole player UI if there's no song
   if (!musicState.currentSong) {
-    return null
+    return (
+      <>
+        {/* Hidden player container - MUST exist for YouTube API */}
+        <div
+          id="youtube-player"
+          style={{
+            display: 'none',
+            width: '0',
+            height: '0',
+          }}
+        />
+      </>
+    )
   }
 
   return (
