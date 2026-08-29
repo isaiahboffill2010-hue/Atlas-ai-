@@ -6,7 +6,7 @@ import HamburgerMenu from '../components/HamburgerMenu'
 import Sidebar from '../components/Sidebar'
 import MusicPlayer from '../components/MusicPlayer'
 import { voiceInteraction } from '../lib/voice'
-import { askClaude } from '../lib/claude'
+import { askAtlas } from '../lib/atlas'
 import { stopSpeaking } from '../lib/tts'
 import FrontDeskPresenceDetector from '../components/FrontDeskPresenceDetector'
 import {
@@ -344,13 +344,18 @@ export default function Home() {
       setTranscript('')
 
     try {
-      console.log('[Atlas] Sending request to Claude:', cleanedRequest)
-      const response = await askClaude(cleanedRequest)
-      console.log('[Atlas] Got response from Claude:', response)
+      console.log('[ATLAS MAIN] Sending request to Atlas:', cleanedRequest)
+      const response = await askAtlas(cleanedRequest)
+      console.log('[ATLAS MAIN] askAtlas returned successfully')
+      console.log('[ATLAS MAIN] Got response from Atlas:', response)
+      console.log('[ATLAS MAIN] Response type:', typeof response)
+      console.log('[ATLAS MAIN] Response length:', response?.length || 0)
+      console.log('[ATLAS MAIN] Response is empty?', !response || response.trim().length === 0)
 
       // Check if stop command was detected while we were thinking
+      console.log('[ATLAS MAIN] Checking stop command flag')
       if (voiceInteraction.getPendingResponseIgnoreFlag()) {
-        console.log('[Atlas] Stop command detected during thinking, ignoring response')
+        console.log('[ATLAS MAIN] EARLY RETURN: Stop command detected during thinking')
         voiceInteraction.resetPendingResponseIgnoreFlag()
         isProcessingRef.current = false
         isConversationActiveRef.current = false
@@ -363,12 +368,15 @@ export default function Home() {
         return
       }
 
-      console.log('[Atlas] Transitioning to speaking state')
+      console.log('[ATLAS MAIN] Stop command flag not set, proceeding to speak')
+      console.log('[ATLAS MAIN] Setting state to speaking')
       setState('speaking')
       voiceInteraction.setSpeaking(true)
 
+      console.log('[ATLAS MAIN] About to call voiceInteraction.speak()')
+      console.log('[ATLAS MAIN] Text to speak:', response.substring(0, 100))
       await voiceInteraction.speak(response, () => {
-        console.log('[Atlas] Speaking finished, transitioning back to listening')
+        console.log('[ATLAS MAIN] Speaking finished, transitioning back to listening')
         setState('listening')
         voiceInteraction.setSpeaking(false)
         isProcessingRef.current = false
@@ -377,8 +385,9 @@ export default function Home() {
         // Resume listening for next question in conversation
         resumeConversationListening()
       })
+      console.log('[ATLAS MAIN] voiceInteraction.speak() completed successfully')
     } catch (err) {
-      console.error('[Atlas] Error:', err)
+      console.error('[ATLAS MAIN] EXCEPTION caught:', err)
       setError(err instanceof Error ? err.message : 'Unknown error')
       handleError()
     }

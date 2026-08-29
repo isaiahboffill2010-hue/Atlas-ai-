@@ -5,7 +5,18 @@ import {
   MusicPlayerStore,
   setMusicPlayerState,
   setMusicError,
+  setCurrentSong,
 } from '../lib/music/music-player-state'
+import {
+  getNewSessionId,
+  enableAutoplay,
+  disableAutoplay,
+  getCurrentSessionId,
+  isSessionValid,
+  setLastPlayedSongId,
+  resetSession,
+} from '../lib/music/autoplay-manager'
+import { scheduleNextSongAutoplay, stopAutoplay } from '../lib/music/autoplay-integration'
 
 export default function MusicPlayer() {
   const [musicState, setMusicState] = useState<MusicPlayerStore>(getMusicPlayerState())
@@ -240,12 +251,25 @@ export default function MusicPlayer() {
       setAutoplayBlocked(false)
       setMusicPlayerState('playing')
       playAttemptedRef.current = false
+      // Enable autoplay when playback starts
+      enableAutoplay()
+      console.log('[MusicPlayer] Autoplay enabled for this session')
     } else if (state === YT.PlayerState.PAUSED) {
       console.log('[MusicPlayer] Audio paused')
       setMusicPlayerState('paused')
+      // Disable autoplay when paused
+      disableAutoplay()
+      console.log('[MusicPlayer] Autoplay disabled (paused)')
     } else if (state === YT.PlayerState.ENDED) {
       console.log('[MusicPlayer] Audio ended')
       setMusicPlayerState('stopped')
+      // Trigger autoplay when current song naturally ends
+      console.log('[MusicPlayer] Song ended naturally, triggering autoplay...')
+      if (musicState.currentSong) {
+        setLastPlayedSongId(musicState.currentSong.videoId)
+        console.log(`[MusicPlayer] Marked last played video: ${musicState.currentSong.videoId}`)
+      }
+      scheduleNextSongAutoplay(500)
     } else if (state === YT.PlayerState.BUFFERING) {
       console.log('[MusicPlayer] Audio buffering...')
     } else if (state === YT.PlayerState.UNSTARTED || state === YT.PlayerState.CUED) {
@@ -263,6 +287,12 @@ export default function MusicPlayer() {
     console.log(`[MusicPlayer] playVideo(${videoId}) called`)
     console.log(`[MusicPlayer] playerReadyRef.current = ${playerReadyRef.current}`)
 
+    // Reset autoplay session when a new song starts playing
+    console.log('[MusicPlayer] Resetting autoplay session for new song')
+    resetSession()
+    const newSessionId = getNewSessionId()
+    console.log(`[MusicPlayer] New autoplay session created: ${newSessionId}`)
+
     if (!playerReadyRef.current) {
       console.log(`[MusicPlayer] ⏳ Player not ready yet, queueing video: ${videoId}`)
       pendingVideoRef.current = videoId
@@ -277,32 +307,62 @@ export default function MusicPlayer() {
 
     try {
       console.log(`[MusicPlayer] ✓ Player ready, loading video: ${videoId}`)
-      playerRef.current.loadVideoById(videoId)
-      console.log(`[MusicPlayer] ✓ loadVideoById(${videoId}) called`)
+
+      // Check if player has required methods
+      if (typeof playerRef.current.cueVideoById !== 'function') {
+        console.error('[MusicPlayer] ✗ Player lost cueVideoById method, player may be corrupted')
+        playerReadyRef.current = false
+        // Queue for retry after short delay
+        setTimeout(() => playVideo(videoId), 500)
+        return
+      }
+
+      // Always cue the video first to ensure it's loaded properly
+      playerRef.current.cueVideoById(videoId)
+      console.log(`[MusicPlayer] ✓ cueVideoById(${videoId}) called`)
 
       // Call playVideo() to actually start playback
-      // Small delay to ensure video is loaded before playing
+      // Longer delay to ensure video is fully cued before playing
       setTimeout(() => {
         try {
-          console.log('[MusicPlayer] Calling playVideo()...')
-          if (playerRef.current?.playVideo) {
-            playAttemptedRef.current = true
-            setAutoplayBlocked(false)
-            playerRef.current.playVideo()
-            console.log('[MusicPlayer] ✓ playVideo() called successfully')
-          } else {
-            console.error('[MusicPlayer] ✗ playVideo method not available on player')
+          console.log('[MusicPlayer] About to call playVideo()...')
+
+          // Critical: Re-check player ref is still valid before calling YouTube methods
+          if (!playerRef.current) {
+            console.error('[MusicPlayer] ✗ Player ref became null, cannot play video')
+            return
           }
+
+          if (typeof playerRef.current.playVideo !== 'function') {
+            console.error('[MusicPlayer] ✗ playVideo method not available on player')
+            console.warn('[MusicPlayer] playerRef.current type:', typeof playerRef.current)
+            console.warn('[MusicPlayer] playerRef.current.playVideo type:', typeof playerRef.current.playVideo)
+            // Mark player as not ready and retry
+            playerReadyRef.current = false
+            setTimeout(() => playVideo(videoId), 500)
+            return
+          }
+
+          console.log('[MusicPlayer] Player ref valid, calling playVideo()...')
+          playAttemptedRef.current = true
+          setAutoplayBlocked(false)
+          playerRef.current.playVideo()
+          console.log('[MusicPlayer] ✓ playVideo() called successfully')
         } catch (error) {
           console.error('[MusicPlayer] ✗ Error calling playVideo():', error)
-          setMusicError(`Playback error: ${error instanceof Error ? error.message : 'Unknown'}`)
+          if (error instanceof Error) {
+            console.error('[MusicPlayer] Error message:', error.message)
+            console.error('[MusicPlayer] Error stack:', error.stack)
+          }
         }
-      }, 100)
+      }, 300)
 
       console.log('[MusicPlayer] Playback initiated, waiting for YouTube state confirmation')
     } catch (error) {
       console.error('[MusicPlayer] ✗ Error loading video:', error)
-      setMusicError(`Failed to load video: ${error instanceof Error ? error.message : 'Unknown'}`)
+      console.error('[MusicPlayer] Will retry video load after delay')
+      // Retry after a delay if player is corrupted
+      setTimeout(() => playVideo(videoId), 500)
     }
   }
 
@@ -336,6 +396,12 @@ export default function MusicPlayer() {
 
   const stopMusic = () => {
     console.log('[MusicPlayer] stopMusic() called')
+    // Cancel autoplay immediately when user stops
+    console.log('[MusicPlayer] Cancelling autoplay due to stop command')
+    stopAutoplay()
+    resetSession()
+    console.log('[MusicPlayer] Autoplay session reset')
+
     if (playerRef.current) {
       try {
         playerRef.current.stopVideo()

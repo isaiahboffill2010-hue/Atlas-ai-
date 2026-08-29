@@ -4,10 +4,15 @@ import * as path from 'path'
 import { randomUUID } from 'crypto'
 
 const OPENCLAW_GATEWAY_URL = process.env.OPENCLAW_GATEWAY_URL || 'ws://127.0.0.1:18789'
-const OPENCLAW_ENABLED = process.env.OPENCLAW_ENABLED !== 'false'
+const OPENCLAW_ENABLED = process.env.OPENCLAW_ENABLED !== 'false' && process.env.TEMPORARY_DISABLE_OPENCLAW !== 'true'
 
 // Load Gateway token from OpenClaw's local configuration file (~/.openclaw/openclaw.json)
 function loadOpenClawToken(): string | undefined {
+  if (!OPENCLAW_ENABLED) {
+    console.log('[OpenClaw] Disabled for testing')
+    return undefined
+  }
+
   try {
     const homeDir = process.env.HOME || process.env.USERPROFILE || ((process.env.HOMEDRIVE || '') + (process.env.HOMEPATH || ''))
     if (!homeDir) {
