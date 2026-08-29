@@ -312,21 +312,28 @@ export default function Home() {
 
       try {
         await handleMusicCommand(musicCommand.command, musicCommand.query)
-        // Don't resume conversation listening - end request completely and return to wake-word mode
-        clearConversationTimeout()
-        setError(null)
-        setState('idle')
+        console.log('[Atlas] Music command executed, returning to wake-word mode')
+
+        // Give React time to render the music player card before transitioning state
+        // This ensures the card appears reliably when a song starts
         setTimeout(() => {
-          startWakeWordDetection()
-        }, 300)
+          clearConversationTimeout()
+          setError(null)
+          setState('idle')
+          setTimeout(() => {
+            startWakeWordDetection()
+          }, 300)
+        }, 100)
       } catch (musicError) {
         console.error('[Atlas] Music command error:', musicError)
-        clearConversationTimeout()
-        setError(null)
-        setState('idle')
         setTimeout(() => {
-          startWakeWordDetection()
-        }, 300)
+          clearConversationTimeout()
+          setError(null)
+          setState('idle')
+          setTimeout(() => {
+            startWakeWordDetection()
+          }, 300)
+        }, 100)
       }
       return
     }
