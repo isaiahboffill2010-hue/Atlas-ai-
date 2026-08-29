@@ -14,43 +14,87 @@ export default function MusicPlayer() {
   const playerReadyRef = useRef(false)
   const pendingVideoRef = useRef<string | null>(null)
   const playAttemptedRef = useRef(false)
+  const isMountedRef = useRef(true)
 
   // Subscribe to music state changes
   useEffect(() => {
     console.log('[MusicPlayer] Setting up state subscription')
+    isMountedRef.current = true
+
     const unsubscribe = subscribe((newState) => {
+      // Only update state if component is mounted
+      if (!isMountedRef.current) {
+        console.log('[MusicPlayer] Component unmounted, ignoring state update')
+        return
+      }
+
       console.log('[MusicPlayer] State subscription fired')
       console.log('[MusicPlayer] New state:', newState)
       console.log('[MusicPlayer] currentSong:', newState.currentSong ? newState.currentSong.title : 'None')
+
+      // Force immediate state update
       setMusicState(newState)
     })
 
     console.log('[MusicPlayer] Initial state after subscription setup:', musicState)
 
     return () => {
-      console.log('[MusicPlayer] Unsubscribing from state updates')
+      console.log('[MusicPlayer] Component unmounting, marking as unmounted')
+      isMountedRef.current = false
       unsubscribe()
     }
   }, [])
 
-  // Initialize YouTube IFrame API
+  // Fallback: Poll music state if subscription might have missed updates
   useEffect(() => {
+    const pollInterval = setInterval(() => {
+      if (!isMountedRef.current) return
+
+      const currentState = getMusicPlayerState()
+      setMusicState((prevState) => {
+        // Only update if state actually changed
+        if (currentState.currentSong?.videoId !== prevState.currentSong?.videoId) {
+          console.log('[MusicPlayer] Polling detected state change, updating:', currentState.currentSong?.title)
+          return currentState
+        }
+        return prevState
+      })
+    }, 500)
+
+    return () => clearInterval(pollInterval)
+  }, [])
+
+  // Lazy YouTube player initialization - only when a song is selected
+  useEffect(() => {
+    // Only initialize when we have a currentSong
+    if (!musicState.currentSong) {
+      console.log('[MusicPlayer] No currentSong, skipping player initialization')
+      return
+    }
+
     if (typeof window === 'undefined') {
       console.log('[MusicPlayer] SSR detected, skipping YouTube initialization')
       return
     }
 
-    console.log('[MusicPlayer] Component mounted, starting YouTube API initialization')
-
-    // Define global callback FIRST before loading script
-    ;(window as any).onYouTubeIframeAPIReady = () => {
-      console.log('[MusicPlayer] ✓ onYouTubeIframeAPIReady callback fired')
-      initializePlayer()
+    // If player is already initialized, nothing to do
+    if (playerReadyRef.current) {
+      console.log('[MusicPlayer] Player already initialized, not reinitializing')
+      return
     }
 
-    // Load YouTube IFrame API script
+    console.log('[MusicPlayer] Song selected, initializing YouTube player lazily')
+
+    // Load YouTube IFrame API if not already loaded
     if (!(window as any).YT) {
       console.log('[MusicPlayer] YouTube API not loaded, loading script from https://www.youtube.com/iframe_api')
+
+      // Define global callback FIRST before loading script
+      ;(window as any).onYouTubeIframeAPIReady = () => {
+        console.log('[MusicPlayer] ✓ onYouTubeIframeAPIReady callback fired')
+        initializePlayer()
+      }
+
       const tag = document.createElement('script')
       tag.src = 'https://www.youtube.com/iframe_api'
       tag.async = true
@@ -73,7 +117,7 @@ export default function MusicPlayer() {
     }
 
     return () => {
-      console.log('[MusicPlayer] Component unmounting, cleaning up')
+      console.log('[MusicPlayer] Cleaning up YouTube player')
       if (playerRef.current) {
         try {
           playerRef.current.destroy?.()
@@ -85,7 +129,7 @@ export default function MusicPlayer() {
       playerReadyRef.current = false
       pendingVideoRef.current = null
     }
-  }, [])
+  }, [musicState.currentSong])
 
   const initializePlayer = () => {
     if (playerReadyRef.current) {
@@ -353,25 +397,10 @@ export default function MusicPlayer() {
     }
   }, [])
 
-  // Always render the YouTube player container so initialization works
-  // But hide the whole player UI if there's no song
+  // Don't render anything if there's no song
   if (!musicState.currentSong) {
-    console.log('[MusicPlayer] No currentSong in state, rendering hidden container only')
-    return (
-      <>
-        {/* Hidden player container - MUST exist for YouTube API initialization */}
-        <div
-          id="youtube-player"
-          style={{
-            position: 'absolute',
-            left: '-9999px',
-            width: '560px',
-            height: '315px',
-            visibility: 'hidden',
-          }}
-        />
-      </>
-    )
+    console.log('[MusicPlayer] No currentSong in state, not rendering player')
+    return null
   }
 
   console.log('[MusicPlayer] currentSong exists, rendering full card UI with song:', musicState.currentSong.title)
@@ -475,29 +504,6 @@ export default function MusicPlayer() {
           {musicState.state === 'playing' && '▶ Playing'}
           {musicState.state === 'paused' && '⏸ Paused'}
           {musicState.state === 'stopped' && '⏹ Stopped'}
-        </div>
-      )}
-
-      {/* Thumbnail (optional) */}
-      {musicState.currentSong.thumbnail && (
-        <div
-          style={{
-            marginTop: '12px',
-            borderRadius: '8px',
-            overflow: 'hidden',
-            height: '160px',
-            background: 'rgba(50, 50, 50, 0.5)',
-          }}
-        >
-          <img
-            src={musicState.currentSong.thumbnail}
-            alt="Song thumbnail"
-            style={{
-              width: '100%',
-              height: '100%',
-              objectFit: 'cover',
-            }}
-          />
         </div>
       )}
 
