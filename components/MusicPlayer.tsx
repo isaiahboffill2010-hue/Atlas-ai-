@@ -118,10 +118,16 @@ export default function MusicPlayer() {
     console.log('[MusicPlayer] Container:', container)
 
     try {
+      console.log('[MusicPlayer] YouTube player container:', document.getElementById('youtube-player'))
       playerRef.current = new (window as any).YT.Player('youtube-player', {
-        height: '315',
-        width: '560',
+        height: '100%',
+        width: '100%',
         videoId: '',
+        playerVars: {
+          autoplay: 0,
+          controls: 1,
+          modestbranding: 1,
+        },
         events: {
           onReady: onPlayerReady,
           onStateChange: onPlayerStateChange,
@@ -129,6 +135,7 @@ export default function MusicPlayer() {
         },
       })
       console.log('[MusicPlayer] ✓ YT.Player instance created successfully')
+      console.log('[MusicPlayer] Player dimensions: 100% x 100%')
       console.log('[MusicPlayer] playerRef.current:', playerRef.current)
     } catch (error) {
       console.error('[MusicPlayer] ✗ Error creating player:', error)
@@ -352,13 +359,15 @@ export default function MusicPlayer() {
     console.log('[MusicPlayer] No currentSong in state, rendering hidden container only')
     return (
       <>
-        {/* Hidden player container - MUST exist for YouTube API */}
+        {/* Hidden player container - MUST exist for YouTube API initialization */}
         <div
           id="youtube-player"
           style={{
-            display: 'none',
-            width: '0',
-            height: '0',
+            position: 'absolute',
+            left: '-9999px',
+            width: '560px',
+            height: '315px',
+            visibility: 'hidden',
           }}
         />
       </>
@@ -385,14 +394,17 @@ export default function MusicPlayer() {
         color: '#fff',
       }}
     >
-      {/* YouTube Player - Visible for debugging */}
+      {/* YouTube Player - Video visible inside card */}
       <div
         id="youtube-player"
         style={{
           width: '100%',
+          aspectRatio: '16 / 9',
+          minHeight: '180px',
           marginBottom: '12px',
           borderRadius: '8px',
           overflow: 'hidden',
+          background: '#000',
         }}
       />
 
