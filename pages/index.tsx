@@ -316,6 +316,7 @@ export default function Home() {
 
         // Give React time to render the music player card before transitioning state
         // This ensures the card appears reliably when a song starts
+        // Increased to 500ms to ensure subscription and state updates fully complete
         setTimeout(() => {
           clearConversationTimeout()
           setError(null)
@@ -323,7 +324,7 @@ export default function Home() {
           setTimeout(() => {
             startWakeWordDetection()
           }, 300)
-        }, 100)
+        }, 500)
       } catch (musicError) {
         console.error('[Atlas] Music command error:', musicError)
         setTimeout(() => {
