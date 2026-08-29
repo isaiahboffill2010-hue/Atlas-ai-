@@ -6,33 +6,60 @@ export interface ParsedMusicCommand {
 }
 
 const PLAY_PATTERNS = [
+  // Natural language: "can/could/would/will you [please] play [the song] <song>"
+  /^(?:can|could|would|will)\s+you\s+(?:please\s+)?play(?:\s+(?:the\s+)?song)?\s+(.+)$/i,
+
+  // Natural language: "please play [the song] <song>"
+  /^please\s+play(?:\s+(?:the\s+)?song)?\s+(.+)$/i,
+
+  // Existing direct commands
+  /^play\s+(?:the\s+)?song\s+(.+)$/i,
   /^play\s+(.+)$/i,
   /^play\s+me\s+(.+)$/i,
   /^put\s+on\s+(.+)$/i,
 ]
 
 const PAUSE_PATTERNS = [
-  /^pause(\s+the\s+music)?$/i,
+  // Natural language
+  /^(?:can|could|would|will)\s+you\s+(?:please\s+)?pause(?:\s+(?:the\s+)?music)?$/i,
+  /^please\s+pause(?:\s+(?:the\s+)?music)?$/i,
+
+  // Direct commands
+  /^pause(?:\s+the\s+music)?$/i,
   /^pause\s+it$/i,
 ]
 
 const RESUME_PATTERNS = [
-  /^resume(\s+the\s+music)?$/i,
-  /^continue$/i,
-  /^continue\s+the\s+music$/i,
+  // Natural language
+  /^(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:resume|unpause)(?:\s+(?:the\s+)?music)?$/i,
+  /^(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:continue|keep\s+playing)(?:\s+(?:the\s+)?music)?$/i,
+  /^please\s+(?:resume|unpause|continue)(?:\s+(?:the\s+)?music)?$/i,
+
+  // Direct commands
+  /^resume(?:\s+the\s+music)?$/i,
+  /^continue(?:\s+the\s+music)?$/i,
   /^play\s+again$/i,
-  /^keep\s+playing$/i,
-  /^unpause$/i,
+  /^keep\s+playing(?:\s+the\s+music)?$/i,
+  /^unpause(?:\s+the\s+music)?$/i,
 ]
 
 const REPLAY_PATTERNS = [
-  /^replay(\s+the\s+song)?$/i,
-  /^restart(\s+the\s+song)?$/i,
+  // Natural language
+  /^(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:replay|restart)(?:\s+(?:the\s+)?song)?$/i,
+  /^please\s+(?:replay|restart)(?:\s+(?:the\s+)?song)?$/i,
+
+  // Direct commands
+  /^replay(?:\s+the\s+song)?$/i,
+  /^restart(?:\s+the\s+song)?$/i,
 ]
 
 const STOP_PATTERNS = [
-  /^stop(\s+the\s+music)?$/i,
-  /^stop\s+the\s+song$/i,
+  // Natural language
+  /^(?:can|could|would|will)\s+you\s+(?:please\s+)?(?:stop|turn\s+off)(?:\s+(?:the\s+)?music)?$/i,
+  /^please\s+(?:stop|turn\s+off)(?:\s+(?:the\s+)?music)?$/i,
+
+  // Direct commands
+  /^stop(?:\s+(?:the\s+)?(?:music|song))?$/i,
   /^turn\s+off\s+the\s+music$/i,
 ]
 
