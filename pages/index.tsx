@@ -64,6 +64,7 @@ export default function Home() {
   const isConversationActiveRef = useRef(false)
   const stateRef = useRef<AtlasState>('idle')
   const requestSourceRef = useRef<'wake-word' | 'front-desk' | null>(null)
+  const musicWasPlayingBeforeConversationRef = useRef(false)
 
   useEffect(() => {
     stateRef.current = state
@@ -76,11 +77,27 @@ export default function Home() {
     }
     conversationTimeoutRef.current = setTimeout(() => {
       console.log('[Atlas] Conversation timeout reached, returning to idle')
+      console.log('[Atlas] Music was playing before conversation:', musicWasPlayingBeforeConversationRef.current)
+
       conversationTimeoutRef.current = null
       isConversationActiveRef.current = false
       setState('idle')
       setTranscript('')
-      startWakeWordDetection()
+      setError(null)
+
+      // Resume music if it was playing before the conversation started
+      if (musicWasPlayingBeforeConversationRef.current) {
+        console.log('[Atlas] Resuming music that was paused when conversation started')
+        musicWasPlayingBeforeConversationRef.current = false
+        if ((window as any).atlasMusic?.resume) {
+          ;(window as any).atlasMusic.resume()
+          console.log('[Atlas] ✓ Music resumed')
+        }
+      }
+
+      setTimeout(() => {
+        startWakeWordDetection()
+      }, 300)
     }, 15000) // 15 seconds
   }
 
@@ -163,6 +180,20 @@ export default function Home() {
     console.log('[Atlas] Wake word detected callback triggered')
     if (isProcessingRef.current) return
     isProcessingRef.current = true
+
+    // Check if music is currently playing and pause it
+    const musicState = (window as any).atlasMusic?.getState?.()
+    if (musicState?.state === 'playing') {
+      console.log('[Atlas] Music is playing, pausing for conversation')
+      musicWasPlayingBeforeConversationRef.current = true
+      if ((window as any).atlasMusic?.pause) {
+        ;(window as any).atlasMusic.pause()
+        console.log('[Atlas] ✓ Music paused for conversation')
+      }
+    } else {
+      console.log('[Atlas] No music playing, or already paused/stopped')
+      musicWasPlayingBeforeConversationRef.current = false
+    }
 
     console.log('[Atlas] Transitioning to listening state')
     beginRequestListening('wake-word')
@@ -275,12 +306,27 @@ export default function Home() {
       isProcessingRef.current = false
       setTranscript('')
 
+      // Clear the flag that would resume music later, since user is explicitly controlling music
+      console.log('[Atlas] Clearing auto-resume flag (user issued explicit music command)')
+      musicWasPlayingBeforeConversationRef.current = false
+
       try {
         await handleMusicCommand(musicCommand.command, musicCommand.query)
-        resumeConversationListening()
+        // Don't resume conversation listening - end request completely and return to wake-word mode
+        clearConversationTimeout()
+        setError(null)
+        setState('idle')
+        setTimeout(() => {
+          startWakeWordDetection()
+        }, 300)
       } catch (musicError) {
         console.error('[Atlas] Music command error:', musicError)
-        resumeConversationListening()
+        clearConversationTimeout()
+        setError(null)
+        setState('idle')
+        setTimeout(() => {
+          startWakeWordDetection()
+        }, 300)
       }
       return
     }
