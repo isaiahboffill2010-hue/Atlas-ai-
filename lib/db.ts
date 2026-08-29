@@ -23,6 +23,7 @@ export interface FileRecord {
   processing_status?: 'pending' | 'processing' | 'ready' | 'failed'
   extracted_text?: string
   extracted_at?: number
+  data_type?: 'fact' | 'memory' | 'life_event' | 'relationship' | 'personality_trait' | 'preference' | 'story' | 'communication_style'
 }
 
 interface FileDatabase {

@@ -20,7 +20,7 @@ export default function LibraryPage() {
   return (
     <>
       <Head>
-        <title>Atlas Library — Atlas Printers</title>
+        <title>Memory Library — AI Loved One</title>
         <meta name="viewport" content="width=device-width, initial-scale=1" />
       </Head>
 

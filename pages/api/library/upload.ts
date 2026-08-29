@@ -4,6 +4,7 @@ import { addKnowledgeFile } from '../../../lib/supabase/library-db'
 import { uploadFileToStorage } from '../../../lib/supabase/storage'
 
 const CATEGORY_TYPE_MAP: Record<string, Record<string, string>> = {
+  // Legacy business categories (preserved for existing files)
   Business: {
     Book: 'books',
     Note: 'notes',
@@ -19,10 +20,62 @@ const CATEGORY_TYPE_MAP: Record<string, Record<string, string>> = {
     Book: 'books',
     Research: 'research',
   },
-  Personal: {
+  // Legacy personal category
+  PersonalBusiness: {
     Note: 'notes',
     Project: 'projects',
     Decision: 'decisions',
+  },
+  // New Memory Library categories
+  LifeStory: {
+    Document: 'documents',
+    Memory: 'memories',
+    Note: 'notes',
+  },
+  Childhood: {
+    Document: 'documents',
+    Memory: 'memories',
+    Story: 'stories',
+  },
+  FamilyRelationships: {
+    Document: 'documents',
+    Memory: 'memories',
+    Story: 'stories',
+  },
+  ImportantMemories: {
+    Document: 'documents',
+    Memory: 'memories',
+    Story: 'stories',
+  },
+  PersonalityTraits: {
+    Document: 'documents',
+    Note: 'notes',
+    Description: 'descriptions',
+  },
+  WorkCareer: {
+    Document: 'documents',
+    Memory: 'memories',
+    Note: 'notes',
+  },
+  LikesDislikes: {
+    Document: 'documents',
+    List: 'lists',
+    Note: 'notes',
+  },
+  LifeLessons: {
+    Document: 'documents',
+    Note: 'notes',
+    Story: 'stories',
+  },
+  PersonalStories: {
+    Document: 'documents',
+    Story: 'stories',
+    Memory: 'memories',
+  },
+  Other: {
+    Document: 'documents',
+    Note: 'notes',
+    Memory: 'memories',
   },
 }
 
