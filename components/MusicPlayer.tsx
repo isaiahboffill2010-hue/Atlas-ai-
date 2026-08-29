@@ -9,9 +9,11 @@ import {
 
 export default function MusicPlayer() {
   const [musicState, setMusicState] = useState<MusicPlayerStore>(getMusicPlayerState())
+  const [autoplayBlocked, setAutoplayBlocked] = useState(false)
   const playerRef = useRef<any>(null)
   const playerReadyRef = useRef(false)
   const pendingVideoRef = useRef<string | null>(null)
+  const playAttemptedRef = useRef(false)
 
   // Subscribe to music state changes
   useEffect(() => {
@@ -184,7 +186,9 @@ export default function MusicPlayer() {
 
     if (state === YT.PlayerState.PLAYING) {
       console.log('[MusicPlayer] ✓ Audio playback started')
+      setAutoplayBlocked(false)
       setMusicPlayerState('playing')
+      playAttemptedRef.current = false
     } else if (state === YT.PlayerState.PAUSED) {
       console.log('[MusicPlayer] Audio paused')
       setMusicPlayerState('paused')
@@ -194,7 +198,13 @@ export default function MusicPlayer() {
     } else if (state === YT.PlayerState.BUFFERING) {
       console.log('[MusicPlayer] Audio buffering...')
     } else if (state === YT.PlayerState.UNSTARTED || state === YT.PlayerState.CUED) {
-      console.log('[MusicPlayer] Video ready but not playing - autoplay may be blocked')
+      // Detect if autoplay was blocked: video is ready (UNSTARTED/CUED) but we tried to play
+      if (playAttemptedRef.current && musicState.state !== 'paused') {
+        console.log('[MusicPlayer] ⚠️ Autoplay blocked by browser - showing manual play button')
+        setAutoplayBlocked(true)
+      } else {
+        console.log('[MusicPlayer] Video ready but not playing')
+      }
     }
   }
 
@@ -225,6 +235,8 @@ export default function MusicPlayer() {
         try {
           console.log('[MusicPlayer] Calling playVideo()...')
           if (playerRef.current?.playVideo) {
+            playAttemptedRef.current = true
+            setAutoplayBlocked(false)
             playerRef.current.playVideo()
             console.log('[MusicPlayer] ✓ playVideo() called successfully')
           } else {
@@ -301,6 +313,24 @@ export default function MusicPlayer() {
       console.log('[MusicPlayer] ✓ Replay initiated - seeked to 0:00 and called playVideo()')
     } catch (error) {
       console.error('[MusicPlayer] Error replaying video:', error)
+    }
+  }
+
+  const handleManualPlay = () => {
+    console.log('[MusicPlayer] Manual play button clicked')
+    if (!playerRef.current) {
+      console.error('[MusicPlayer] ✗ No player available for manual play')
+      return
+    }
+
+    try {
+      console.log('[MusicPlayer] Attempting playback from manual user click')
+      playerRef.current.playVideo()
+      setAutoplayBlocked(false)
+      console.log('[MusicPlayer] ✓ Manual playVideo() called')
+    } catch (error) {
+      console.error('[MusicPlayer] Error on manual play:', error)
+      setMusicError(`Playback error: ${error instanceof Error ? error.message : 'Unknown'}`)
     }
   }
 
@@ -394,19 +424,48 @@ export default function MusicPlayer() {
         {musicState.currentSong.channel}
       </div>
 
-      {/* Status */}
-      <div
-        style={{
-          fontSize: '12px',
-          textTransform: 'capitalize',
-          opacity: '0.8',
-          letterSpacing: '0.5px',
-        }}
-      >
-        {musicState.state === 'playing' && '▶ Playing'}
-        {musicState.state === 'paused' && '⏸ Paused'}
-        {musicState.state === 'stopped' && '⏹ Stopped'}
-      </div>
+      {/* Status or Manual Play Button */}
+      {autoplayBlocked ? (
+        <button
+          onClick={handleManualPlay}
+          style={{
+            marginTop: '8px',
+            padding: '10px 16px',
+            background: 'linear-gradient(135deg, #00d9ff 0%, #0099cc 100%)',
+            border: 'none',
+            borderRadius: '6px',
+            color: '#000',
+            fontWeight: '600',
+            fontSize: '13px',
+            cursor: 'pointer',
+            width: '100%',
+            transition: 'all 0.2s ease',
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.transform = 'scale(1.02)'
+            e.currentTarget.style.boxShadow = '0 4px 12px rgba(0, 217, 255, 0.4)'
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.transform = 'scale(1)'
+            e.currentTarget.style.boxShadow = 'none'
+          }}
+        >
+          ▶ Tap to Play
+        </button>
+      ) : (
+        <div
+          style={{
+            fontSize: '12px',
+            textTransform: 'capitalize',
+            opacity: '0.8',
+            letterSpacing: '0.5px',
+          }}
+        >
+          {musicState.state === 'playing' && '▶ Playing'}
+          {musicState.state === 'paused' && '⏸ Paused'}
+          {musicState.state === 'stopped' && '⏹ Stopped'}
+        </div>
+      )}
 
       {/* Thumbnail (optional) */}
       {musicState.currentSong.thumbnail && (
