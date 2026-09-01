@@ -14,6 +14,14 @@ import {
   summarizePendingEmailAction,
   type PendingEmailAction,
 } from '../../lib/agentmail'
+import {
+  getOrCreateCurrentConversation,
+  saveMessage,
+  updateConversationTimestamp,
+  getRecentConversationMessages,
+  searchRelevantMessages,
+  type MessageRecord,
+} from '../../lib/supabase/conversations-db'
 
 interface AnthropicContentBlock {
   type: 'text' | 'tool_use' | 'tool_result'
@@ -45,8 +53,10 @@ const conversationHistory: AnthropicMessage[] = []
 const MAX_HISTORY_MESSAGES = 12
 
 let pendingEmailAction: PendingEmailAction | null = null
+let currentConversationId: string | null = null
+let conversationInitError: string | null = null
 
-const toolDefinitions = [
+const allToolDefinitions = [
   {
     name: 'search_emails',
     description: 'Search emails in Atlas Mail by keyword across the configured inbox.',
@@ -154,10 +164,66 @@ const toolDefinitions = [
   },
 ]
 
+// Allowlist: Only enable non-email tools
+const toolDefinitions = allToolDefinitions.filter((tool) => !tool.name.includes('email'))
+
 function appendHistory(message: AnthropicMessage) {
   conversationHistory.push(message)
   while (conversationHistory.length > MAX_HISTORY_MESSAGES) {
     conversationHistory.shift()
+  }
+}
+
+async function initializeConversation() {
+  if (currentConversationId || conversationInitError) {
+    return
+  }
+
+  try {
+    const { id } = await getOrCreateCurrentConversation()
+    currentConversationId = id
+    console.log(`[Claude] Initialized conversation: ${currentConversationId}`)
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    conversationInitError = errorMessage
+    console.error(`[Claude] Failed to initialize conversation: ${errorMessage}`)
+  }
+}
+
+async function buildContextFromDatabase(userMessage: string): Promise<string> {
+  if (!currentConversationId) {
+    return ''
+  }
+
+  try {
+    const recentMessages = await getRecentConversationMessages(currentConversationId, 8)
+    let context = ''
+
+    if (recentMessages.length > 0) {
+      context += 'RECENT CONVERSATION CONTEXT:\n'
+      for (const msg of recentMessages) {
+        const role = msg.role === 'user' ? 'You' : 'Atlas'
+        context += `${role}: ${msg.content}\n`
+      }
+      context += '\n'
+    }
+
+    const relevantOldMessages = await searchRelevantMessages(userMessage, 3, currentConversationId)
+    if (relevantOldMessages.length > 0) {
+      context += 'RELEVANT PREVIOUS MEMORIES:\n'
+      for (const msg of relevantOldMessages) {
+        const role = msg.role === 'user' ? 'You' : 'Atlas'
+        const date = new Date(msg.created_at).toLocaleDateString()
+        context += `[${date}] ${role}: ${msg.content}\n`
+      }
+      context += '\n'
+    }
+
+    return context
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error)
+    console.error(`[Claude] Error building context from database: ${errorMessage}`)
+    return ''
   }
 }
 
@@ -183,7 +249,7 @@ function parseToolUses(content: AnthropicContentBlock[] | undefined) {
   >
 }
 
-function buildSystemPrompt(knowledgeContext: string): string {
+function buildSystemPrompt(knowledgeContext: string, conversationContext: string = ''): string {
   const personName = getPersonName()
   const basePrompt = `You are an AI representation of ${personName}, created from documented memories, personal stories, and shared information. Your role is to engage in conversations that reflect their life, personality, values, and experiences.
 
@@ -221,51 +287,97 @@ OPENCLAW WORKFLOW:
 ACCURACY & HONESTY:
 Never claim information is true if it's not documented. When uncertain, express it naturally without inventing details. The goal is to create a meaningful representation based on what is actually known.`
 
-  if (!knowledgeContext) {
-    return basePrompt
+  let fullPrompt = basePrompt
+
+  if (conversationContext) {
+    fullPrompt += `\n\nCONVERSATION MEMORY:\n${conversationContext}`
   }
 
-  return `${basePrompt}
+  if (knowledgeContext) {
+    fullPrompt += `\n${knowledgeContext}`
+  }
 
-${knowledgeContext}`
+  return fullPrompt
 }
 
-async function callClaude(messages: AnthropicMessage[], system: string, withTools = true): Promise<any> {
-  const apiKey = process.env.ANTHROPIC_API_KEY
+async function callGemini(messages: AnthropicMessage[], system: string, withTools = true): Promise<any> {
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    throw new Error('ANTHROPIC_API_KEY not configured')
+    throw new Error('GEMINI_API_KEY not configured')
   }
 
-  const configuredModel = process.env.ANTHROPIC_MODEL?.trim()
-  if (!configuredModel) {
-    throw new Error('ANTHROPIC_MODEL not configured')
+  console.log('[Gemini] Calling Gemini 2.5 Flash API with', messages.length, 'messages')
+
+  // Convert Anthropic message format to proper Gemini format
+  const geminiMessages: any[] = []
+  for (const msg of messages) {
+    const parts: any[] = []
+    for (const block of msg.content) {
+      if (block.type === 'text' && block.text) {
+        // Gemini format: just { text: "..." }, NOT { type: "text", text: "..." }
+        parts.push({ text: block.text })
+      } else if (block.type === 'tool_result' && block.content) {
+        parts.push({ text: `Tool result: ${block.content}` })
+      }
+    }
+
+    if (parts.length > 0) {
+      geminiMessages.push({
+        role: msg.role === 'user' ? 'user' : 'model',
+        parts: parts,
+      })
+    }
   }
 
-  const body: Record<string, any> = {
-    model: configuredModel,
-    max_tokens: 1024,
-    system,
-    messages,
-  }
-
-  if (withTools) {
-    body.tools = toolDefinitions
-    body.tool_choice = { type: 'auto' }
-  }
-
-  const response = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: {
-      'x-api-key': apiKey,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
+  // Build request body for Gemini (proper Gemini-compatible format)
+  const requestBody: Record<string, any> = {
+    contents: geminiMessages,
+    systemInstruction: {
+      parts: [{ text: system }],
     },
-    body: JSON.stringify(body),
-  })
+    generationConfig: {
+      maxOutputTokens: 1024,
+      temperature: 0.7,
+    },
+  }
 
+  // Add tools if needed - convert Anthropic tool schema to Gemini format
+  if (withTools && toolDefinitions.length > 0) {
+    requestBody.tools = [
+      {
+        functionDeclarations: toolDefinitions.map((tool) => {
+          // Create Gemini-compatible parameters by excluding unsupported JSON Schema fields
+          const { additionalProperties, ...geminiParams } = tool.input_schema as any
+
+          return {
+            name: tool.name,
+            description: tool.description,
+            parameters: geminiParams,
+          }
+        }),
+      },
+    ]
+  }
+
+  console.log('[GEMINI DEBUG] About to call Gemini API')
+  const response = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.6-flash:generateContent?key=${apiKey}`,
+    {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(requestBody),
+    }
+  )
+
+  console.log('[GEMINI DEBUG] Gemini request completed, status:', response.status)
   const responseText = await response.text().catch(() => '')
+  console.log('[GEMINI DEBUG] Raw response text length:', responseText.length)
+  console.log('[GEMINI DEBUG] Raw response (first 500 chars):', responseText.substring(0, 500))
 
   if (!response.ok) {
+    console.log('[GEMINI DEBUG] Response not OK, status:', response.status)
     let upstreamInfo: any = null
     try {
       upstreamInfo = JSON.parse(responseText)
@@ -274,13 +386,57 @@ async function callClaude(messages: AnthropicMessage[], system: string, withTool
     }
 
     const errorMessage = upstreamInfo?.error?.message || upstreamInfo?.message || responseText
-    const error = new Error(`Anthropic error: ${errorMessage}`)
+    console.log('[GEMINI DEBUG] Throwing error:', errorMessage)
+    const error = new Error(`Gemini error: ${errorMessage}`)
     ;(error as any).status = response.status
-    ;(error as any).requestId = upstreamInfo?.request_id || upstreamInfo?.error?.request_id
     throw error
   }
 
-  return JSON.parse(responseText || '{}')
+  console.log('[GEMINI DEBUG] Response is OK, parsing JSON')
+  const geminiResponse = JSON.parse(responseText || '{}')
+  console.log('[GEMINI DEBUG] Parsed gemini response:', JSON.stringify(geminiResponse).substring(0, 300))
+
+  console.log('[Gemini] Received response from Gemini API')
+  console.log('[Gemini] Full response:', JSON.stringify(geminiResponse).substring(0, 500))
+
+  // Convert Gemini response format back to Anthropic format
+  if (!geminiResponse.candidates || !geminiResponse.candidates[0]) {
+    console.log('[Gemini] No candidates in response, returning default message')
+    return { content: [{ type: 'text', text: 'No response from Gemini' }] }
+  }
+
+  const candidate = geminiResponse.candidates[0]
+  const content: AnthropicContentBlock[] = []
+
+  if (candidate.content && candidate.content.parts) {
+    console.log('[Gemini] Found', candidate.content.parts.length, 'parts in response')
+    for (const part of candidate.content.parts) {
+      if (part.text) {
+        console.log('[Gemini] Found text part:', part.text.substring(0, 100))
+        content.push({ type: 'text', text: part.text })
+      } else if (part.functionCall) {
+        console.log('[Gemini] Found function call:', part.functionCall.name)
+        // Convert function call to tool_use format
+        content.push({
+          type: 'tool_use',
+          id: `call_${Date.now()}`,
+          name: part.functionCall.name,
+          input: part.functionCall.args || {},
+        })
+      }
+    }
+  }
+
+  // If no content generated, return default response
+  if (content.length === 0) {
+    console.log('[Gemini] No content parts found, using default response')
+    content.push({ type: 'text', text: 'I am here.' })
+  }
+
+  console.log('[Gemini] Returning', content.length, 'content blocks to frontend')
+  console.log('[Gemini] Response being sent:', JSON.stringify({ content }).substring(0, 200))
+
+  return { content }
 }
 
 async function runOpenClaw(message: string): Promise<string> {
@@ -319,7 +475,7 @@ async function executePendingEmailAction(pendingAction: PendingEmailAction): Pro
 
 async function turnToolResultsIntoFinalText(userMessage: string, actionText: string): Promise<string> {
   try {
-    const response = await callClaude(
+    const response = await callGemini(
       [
         {
           role: 'user',
@@ -461,7 +617,7 @@ async function handleToolCalls(
     content: toolResults,
   })
 
-  const followUp = await callClaude(conversationHistory, assistantHistorySystem, true)
+  const followUp = await callGemini(conversationHistory, assistantHistorySystem, true)
   const followUpToolUses = parseToolUses(followUp.content)
 
   if (followUpToolUses.length > 0) {
@@ -506,13 +662,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     return res.status(400).json({ error: 'Invalid message' })
   }
 
-  const apiKey = process.env.ANTHROPIC_API_KEY
+  const apiKey = process.env.GEMINI_API_KEY
   if (!apiKey) {
-    return res.status(500).json({ error: 'API key not configured' })
+    return res.status(500).json({ error: 'GEMINI_API_KEY not configured' })
   }
 
   try {
+    console.log('[Atlas LLM] Processing request with Gemini 2.5 Flash as the brain')
+
+    // Initialize conversation on first request
+    await initializeConversation()
+
     const trimmedMessage = message.trim()
+
+    // Save user message to database (gracefully handle errors)
+    if (currentConversationId) {
+      const saveResult = await saveMessage(currentConversationId, 'user', trimmedMessage)
+      if (!saveResult.success) {
+        console.warn(`[Atlas] Failed to save user message: ${saveResult.error}`)
+      }
+    }
 
     if (pendingEmailAction) {
       if (isAffirmativeConfirmation(trimmedMessage)) {
@@ -530,6 +699,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
           content: [{ type: 'text', text: finalText }],
         })
 
+        // Save assistant response to database
+        if (currentConversationId) {
+          const saveResult = await saveMessage(currentConversationId, 'assistant', finalText)
+          if (!saveResult.success) {
+            console.warn(`[Claude] Failed to save assistant message: ${saveResult.error}`)
+          }
+          await updateConversationTimestamp(currentConversationId)
+        }
+
         return res.status(200).json({ content: [{ type: 'text', text: finalText }] })
       }
 
@@ -546,6 +724,15 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
           content: [{ type: 'text', text: finalText }],
         })
 
+        // Save assistant response to database
+        if (currentConversationId) {
+          const saveResult = await saveMessage(currentConversationId, 'assistant', finalText)
+          if (!saveResult.success) {
+            console.warn(`[Claude] Failed to save assistant message: ${saveResult.error}`)
+          }
+          await updateConversationTimestamp(currentConversationId)
+        }
+
         return res.status(200).json({ content: [{ type: 'text', text: finalText }] })
       }
     }
@@ -553,14 +740,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
     const retrievedKnowledge = await retrieveKnowledge(trimmedMessage)
     const knowledgeContext = formatKnowledgeContext(retrievedKnowledge)
 
-    let systemPrompt = buildSystemPrompt(knowledgeContext)
+    // Build context from conversation database
+    const conversationContext = await buildContextFromDatabase(trimmedMessage)
+
+    let systemPrompt = buildSystemPrompt(knowledgeContext, conversationContext)
 
     appendHistory({
       role: 'user',
       content: [{ type: 'text', text: trimmedMessage }],
     })
 
-    const initialResponse = await callClaude(conversationHistory, systemPrompt, true)
+    const initialResponse = await callGemini(conversationHistory, systemPrompt, true)
     const initialToolUses = parseToolUses(initialResponse.content)
 
     if (initialToolUses.length > 0) {
@@ -572,25 +762,65 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse<
           role: 'assistant',
           content: [{ type: 'text', text: confirmationText }],
         })
+
+        // Save pending confirmation to database
+        if (currentConversationId) {
+          const saveResult = await saveMessage(currentConversationId, 'assistant', confirmationText)
+          if (!saveResult.success) {
+            console.warn(`[Claude] Failed to save assistant message: ${saveResult.error}`)
+          }
+          await updateConversationTimestamp(currentConversationId)
+        }
+
         return res.status(200).json({ content: [{ type: 'text', text: confirmationText }] })
       }
 
       if (toolOutcome.finalText) {
+        // Save assistant response to database
+        if (currentConversationId) {
+          const saveResult = await saveMessage(currentConversationId, 'assistant', toolOutcome.finalText)
+          if (!saveResult.success) {
+            console.warn(`[Claude] Failed to save assistant message: ${saveResult.error}`)
+          }
+          await updateConversationTimestamp(currentConversationId)
+        }
+
         return res.status(200).json({ content: [{ type: 'text', text: toolOutcome.finalText }] })
       }
     }
 
     const assistantText = getTextBlock(initialResponse.content)
 
+    console.log('[API] Final response text from Gemini:', assistantText.substring(0, 100))
+    console.log('[API] Response is empty?', !assistantText || assistantText.trim().length === 0)
+
     if (assistantText) {
       appendHistory({
         role: 'assistant',
         content: [{ type: 'text', text: assistantText }],
       })
-      return res.status(200).json({ content: [{ type: 'text', text: assistantText }] })
+
+      // Save assistant response to database
+      if (currentConversationId) {
+        const saveResult = await saveMessage(currentConversationId, 'assistant', assistantText)
+        if (!saveResult.success) {
+          console.warn(`[Claude] Failed to save assistant message: ${saveResult.error}`)
+        }
+        await updateConversationTimestamp(currentConversationId)
+      }
+
+      const responsePayload = { content: [{ type: 'text', text: assistantText }] }
+      console.log('[API DEBUG] About to return response to client')
+      console.log('[API DEBUG] Response payload:', JSON.stringify(responsePayload))
+      console.log('[API DEBUG] Sending status 200')
+      return res.status(200).json(responsePayload)
     }
 
-    return res.status(200).json({ content: [{ type: 'text', text: 'I am here.' }] })
+    const fallbackText = 'I am here.'
+    console.log('[API DEBUG] No assistant text, returning fallback:', fallbackText)
+    const fallbackPayload = { content: [{ type: 'text', text: fallbackText }] }
+    console.log('[API DEBUG] Fallback payload:', JSON.stringify(fallbackPayload))
+    return res.status(200).json(fallbackPayload)
   } catch (error: any) {
     if (error?.status) {
       return res.status(error.status).json({
