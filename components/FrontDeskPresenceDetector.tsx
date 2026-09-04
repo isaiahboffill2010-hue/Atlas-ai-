@@ -56,6 +56,8 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
   const presenceSessionSuppressedRef = useRef(false)
   const lastSeenAtRef = useRef<number | null>(null)
   const cooldownUntilRef = useRef(0)
+  const lastDetectionLogTimeRef = useRef(0)
+  const lastDetectionStateRef = useRef<'person' | 'none' | null>(null)
   const debugStateRef = useRef<FrontDeskDebugState>({
     cameraStatus: 'disabled',
     personStatus: 'unknown',
@@ -72,6 +74,7 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
   }, [onPresenceConfirmed])
 
   useEffect(() => {
+    console.log('[EFFECT] FrontDeskPresenceDetector useEffect running | enabled=' + enabled)
     if (!enabled) {
       debugStateRef.current = {
         cameraStatus: 'disabled',
@@ -95,7 +98,18 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
     }
 
     const setDebugState = (next: Partial<FrontDeskDebugState>) => {
+      const oldStatus = debugStateRef.current.personStatus
       debugStateRef.current = { ...debugStateRef.current, ...next }
+
+      if (next.personStatus && next.personStatus !== oldStatus) {
+        console.warn('================== PERSON STATE CHANGE ==================')
+        console.warn('[PERSON STATUS UPDATE] Previous: ' + oldStatus)
+        console.warn('[PERSON STATUS UPDATE] New: ' + next.personStatus)
+        console.warn('[PERSON STATUS UPDATE] Message: ' + next.message)
+        console.warn('[PERSON STATUS UPDATE] Time: ' + new Date().toLocaleTimeString())
+        console.warn('========================================================')
+      }
+
       emitDebug(onDebugStateChange, debugStateRef.current)
     }
 
@@ -142,6 +156,7 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
       lastSeenAtRef.current = null
 
       if (emit) {
+        console.log(`[PERSON-DEBUG] transitioning to clear | reason="${message}"`)
         setDebugState({
           personStatus: 'clear',
           frontDeskActive: false,
@@ -158,6 +173,9 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
 
         if (debugStateRef.current.personStatus !== 'detected') {
           console.log('[Vision] Person detected')
+          console.log('[PERSON] Setting personStatus = detected')
+          console.log('[PERSON] Source: evaluatePresence(hasPerson=true)')
+          console.log('[PERSON] Reason: Camera frame contains person above confidence threshold')
         }
 
         setDebugState({
@@ -168,6 +186,7 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
         if (!presenceActiveRef.current) {
           if (presenceCandidateSinceRef.current === null) {
             presenceCandidateSinceRef.current = now
+            console.log('[PRESENCE-EVAL] Starting presence candidate timer')
             return
           }
 
@@ -186,10 +205,12 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
         if (presenceActiveRef.current && !presenceSessionTriggeredRef.current && !presenceSessionSuppressedRef.current) {
           if (!latestCanTriggerRef.current()) {
             presenceSessionSuppressedRef.current = true
+            console.log('[PRESENCE-EVAL] Trigger suppressed: canTrigger returned false')
             return
           }
 
           if (now < cooldownUntilRef.current) {
+            console.log('[PRESENCE-EVAL] In cooldown, not triggering')
             return
           }
 
@@ -200,10 +221,14 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
           void latestOnPresenceConfirmedRef.current()
         }
       } else {
+        console.log('[PRESENCE-EVAL] hasPerson=false | presenceActiveRef=' + presenceActiveRef.current + ' lastSeenMs=' + (lastSeenAtRef.current ? now - lastSeenAtRef.current : 'null') + ' threshold=' + frontDeskConfig.personAbsenceMs)
         presenceCandidateSinceRef.current = null
 
         if (!presenceActiveRef.current) {
           if (debugStateRef.current.personStatus !== 'clear') {
+            console.log('[PERSON] Setting personStatus = clear')
+            console.log('[PERSON] Source: evaluatePresence(hasPerson=false) [not yet confirmed]')
+            console.log('[PERSON] Reason: No person in frame and presence not yet confirmed')
             setDebugState({
               personStatus: 'clear',
               message: 'No person detected',
@@ -214,6 +239,10 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
 
         if (lastSeenAtRef.current && now - lastSeenAtRef.current >= frontDeskConfig.personAbsenceMs) {
           console.log('[Vision] Person no longer detected')
+          console.log('[PERSON] Setting personStatus = clear via markPersonAbsent()')
+          console.log('[PERSON] Source: evaluatePresence(hasPerson=false) [absence timeout]')
+          console.log('[PERSON] Time since last seen: ' + (now - lastSeenAtRef.current) + 'ms / Threshold: ' + frontDeskConfig.personAbsenceMs + 'ms')
+          console.log('[PRESENCE-EVAL] CALLING markPersonAbsent - absence timeout reached')
           markPersonAbsent('No person detected')
         }
       }
@@ -232,7 +261,24 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
 
       try {
         const predictions = await model.detect(video)
-        const hasPerson = predictions.some((prediction: any) => prediction.class === 'person' && prediction.score >= frontDeskConfig.personConfidenceThreshold)
+        const personPredictions = predictions.filter((p: any) => p.class === 'person')
+        const maxScore = personPredictions.length > 0 ? Math.max(...personPredictions.map((p: any) => p.score)) : 0
+        const hasPerson = personPredictions.some((p: any) => p.score >= frontDeskConfig.personConfidenceThreshold)
+        const detectionState = hasPerson ? 'person' : 'none'
+
+        // Log detection results with throttling (every 1000ms or on state change)
+        const now = Date.now()
+        if (now - lastDetectionLogTimeRef.current > 1000 || detectionState !== lastDetectionStateRef.current) {
+          console.log('==================== PERSON DETECTOR ====================')
+          console.log('[PERSON DETECTOR] Time: ' + new Date().toLocaleTimeString())
+          console.log('[PERSON DETECTOR] Result: ' + (hasPerson ? 'PERSON DETECTED' : 'NO PERSON'))
+          console.log('[PERSON DETECTOR] Confidence: ' + maxScore.toFixed(3) + ' (threshold: ' + frontDeskConfig.personConfidenceThreshold + ')')
+          console.log('[PERSON DETECTOR] Persons in frame: ' + personPredictions.length + ' / Total predictions: ' + predictions.length)
+          console.log('=======================================================')
+          lastDetectionLogTimeRef.current = now
+        }
+
+        lastDetectionStateRef.current = detectionState
         evaluatePresence(hasPerson)
       } catch (error) {
         warn(`Detection failed: ${error instanceof Error ? error.message : String(error)}`)
@@ -240,15 +286,23 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
     }
 
     const runDetectionLoop = async () => {
+      console.log('[DETECTION-LOOP] Starting detection loop')
+      let frameCount = 0
       while (!cancelled && activeRef.current) {
         const start = Date.now()
         await detectFrame()
         const elapsed = Date.now() - start
+        frameCount++
+        if (frameCount % 10 === 0) {
+          console.log(`[DETECTION-LOOP] ${frameCount} frames processed`)
+        }
         await delay(Math.max(0, frontDeskConfig.detectionIntervalMs - elapsed))
       }
+      console.log('[DETECTION-LOOP] Stopped after ' + frameCount + ' frames')
     }
 
     const startCamera = async () => {
+      console.log('[CAMERA-START] startCamera called')
       if (cancelled) return
 
       clearTimer(reconnectTimerRef.current)
@@ -261,6 +315,7 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
       modelRef.current = null
       activeRef.current = true
       clearSimulationTimers()
+      console.log('[CAMERA-START] activeRef set to true')
 
       if (frontDeskConfig.simulatePerson) {
         const triggerCycle = () => {
@@ -414,6 +469,7 @@ export const FrontDeskPresenceDetector: React.FC<FrontDeskPresenceDetectorProps>
     void start()
 
     return () => {
+      console.log('[EFFECT-CLEANUP] FrontDeskPresenceDetector cleanup running | reason=dependency_changed_or_unmount')
       cancelled = true
       activeRef.current = false
       clearTimer(detectionLoopRef.current)

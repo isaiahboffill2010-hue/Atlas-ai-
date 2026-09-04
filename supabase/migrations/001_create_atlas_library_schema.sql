@@ -2,7 +2,7 @@
 CREATE TABLE IF NOT EXISTS knowledge_files (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   name TEXT NOT NULL,
-  category TEXT NOT NULL CHECK (category IN ('Business', 'Printing', 'Education', 'Personal')),
+  category TEXT NOT NULL CHECK (category IN ('Business', 'Printing', 'Personal')),
   type TEXT NOT NULL,
   storage_path TEXT NOT NULL UNIQUE,
   file_size INTEGER NOT NULL,

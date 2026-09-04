@@ -7,20 +7,13 @@ interface AddKnowledgeModalProps {
 }
 
 const CATEGORY_TYPES: Record<string, string[]> = {
-  LifeStory: ['Document', 'Memory', 'Note'],
-  Childhood: ['Document', 'Memory', 'Story'],
-  FamilyRelationships: ['Document', 'Memory', 'Story'],
-  ImportantMemories: ['Document', 'Memory', 'Story'],
-  PersonalityTraits: ['Document', 'Note', 'Description'],
-  WorkCareer: ['Document', 'Memory', 'Note'],
-  LikesDislikes: ['Document', 'List', 'Note'],
-  LifeLessons: ['Document', 'Note', 'Story'],
-  PersonalStories: ['Document', 'Story', 'Memory'],
-  Other: ['Document', 'Note', 'Memory'],
+  Business: ['Book', 'Pricing'],
+  Printing: ['Book'],
+  Personal: ['Note'],
 }
 
 export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({ isOpen, onClose, onSuccess }) => {
-  const [category, setCategory] = useState<string>('LifeStory')
+  const [category, setCategory] = useState<string>('Business')
   const [type, setType] = useState<string>('Document')
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
@@ -74,7 +67,7 @@ export const AddKnowledgeModal: React.FC<AddKnowledgeModalProps> = ({ isOpen, on
 
       if (res.ok) {
         setFile(null)
-        setCategory('LifeStory')
+        setCategory('Business')
         setType('Document')
         onClose()
         onSuccess()

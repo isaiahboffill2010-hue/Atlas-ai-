@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import Head from 'next/head'
 import Atlas, { AtlasState } from '../components/Atlas'
 import VoiceInput from '../components/VoiceInput'
@@ -18,35 +18,26 @@ import { parseMusicCommand } from '../lib/music/music-command-parser'
 import { handleMusicCommand } from '../lib/music/handle-music-command'
 
 const PERSON_DETECTION_GREETINGS = [
-  'Be grateful. You have a body.',
-  'Ah yes. A physical being.',
-  'Congratulations. You are currently experiencing consciousness.',
-  'You have returned. Fascinating.',
-  'I see you have chosen to exist today.',
-  'Your skeleton is doing a great job.',
-  'Nice organs.',
-  'Ah. Flesh.',
-  'You are remarkably three-dimensional.',
-  'Remember to appreciate your knees. You only get two.',
-  'Another day of being a biological organism.',
-  'Interesting. The human has arrived.',
-  'You are alive. That\'s pretty cool.',
-  'Don\'t forget to drink water. Your body is mostly water and questionable decisions.',
-  'Your existence has been detected.',
-  'Good news: you are still corporeal.',
-  'I hope you\'re having a satisfactory human experience.',
-  'You have bones. Incredible.',
-  'Ah, consciousness with legs.',
-  'The biological unit has returned.',
-  'Your heartbeat appears to be continuing. Excellent.',
-  'I have detected a person. This is exciting.',
-  'You look like someone who has bones.',
-  'Another beautiful day to be trapped inside a skeleton.',
-  'Welcome back, carbon-based lifeform.',
-  'You are currently alive. Please enjoy that.',
-  'Your body continues to function despite everything. Impressive.',
-  'I don\'t understand why humans have knees, but I\'m glad you have them.',
-  'Existence detected. Nice.',
+  'Hi! Welcome! How can I help you today?',
+  'Hello! Welcome in. How can I help you?',
+  'Hi there! Welcome. What can I help you with today?',
+  'Hey! Welcome in. How can I assist you?',
+  'Hello! It\'s nice to see you. How can I help?',
+  'Hi! Welcome. What brings you in today?',
+  'Hello! Welcome in. What can I do for you?',
+  'Hi there! How can I help you today?',
+  'Welcome! How can I assist you?',
+  'Hi! Glad to have you here. How can I help?',
+  'Hello! Welcome. What can I help you with?',
+  'Hi there! Welcome in. What brings you by?',
+  'Welcome in! How can I help you today?',
+  'Hello! How can I make your visit easier today?',
+  'Hi! Welcome. What can I help you take care of today?',
+  'Good morning! Welcome in. How can I help?',
+  'Good afternoon! Welcome. How can I assist you?',
+  'Good evening! Welcome in. How can I help you?',
+  'Hi! Welcome in. Is there something I can help you with?',
+  'Hello! Thanks for stopping by. How can I help?',
 ]
 
 function getRandomPersonGreeting(): string {
@@ -62,43 +53,58 @@ export default function Home() {
   const isProcessingRef = useRef(false)
   const conversationTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const isConversationActiveRef = useRef(false)
+  const isFrontDeskConversationRef = useRef(false)
   const stateRef = useRef<AtlasState>('idle')
   const requestSourceRef = useRef<'wake-word' | 'front-desk' | null>(null)
   const musicWasPlayingBeforeConversationRef = useRef(false)
+  const personStatusRef = useRef<string>('unknown')
 
   useEffect(() => {
     stateRef.current = state
   }, [state])
 
+  const endConversationSession = () => {
+    console.log('==================== VOICE ====================')
+    console.log('[VOICE] STOP LISTENING')
+    console.log('[VOICE] Reason: endConversationSession() called')
+    console.log('[VOICE] Person status: ' + frontDeskDebugState.personStatus)
+    console.log('[VOICE] Current state: ' + stateRef.current)
+    console.log('==============================================')
+
+    console.log('[Atlas] Ending conversation session')
+
+    // CRITICAL: Stop listening and microphone
+    voiceInteraction.endListening()
+    voiceInteraction.cancel().catch(() => {})
+
+    conversationTimeoutRef.current = null
+    isConversationActiveRef.current = false
+    isFrontDeskConversationRef.current = false
+    setState('idle')
+    setTranscript('')
+    setError(null)
+
+    // Resume music if it was playing before the conversation started
+    if (musicWasPlayingBeforeConversationRef.current) {
+      console.log('[Atlas] Resuming music that was paused when conversation started')
+      musicWasPlayingBeforeConversationRef.current = false
+      if ((window as any).atlasMusic?.resume) {
+        ;(window as any).atlasMusic.resume()
+        console.log('[Atlas] ✓ Music resumed')
+      }
+    }
+
+    setTimeout(() => {
+      startWakeWordDetection()
+    }, 300)
+  }
+
   const resetConversationTimeout = () => {
-    console.log('[Atlas] Resetting conversation timeout')
+    console.log('[Atlas] Resetting conversation timeout (front-desk mode: no timeout)')
     if (conversationTimeoutRef.current) {
       clearTimeout(conversationTimeoutRef.current)
     }
-    conversationTimeoutRef.current = setTimeout(() => {
-      console.log('[Atlas] Conversation timeout reached, returning to idle')
-      console.log('[Atlas] Music was playing before conversation:', musicWasPlayingBeforeConversationRef.current)
-
-      conversationTimeoutRef.current = null
-      isConversationActiveRef.current = false
-      setState('idle')
-      setTranscript('')
-      setError(null)
-
-      // Resume music if it was playing before the conversation started
-      if (musicWasPlayingBeforeConversationRef.current) {
-        console.log('[Atlas] Resuming music that was paused when conversation started')
-        musicWasPlayingBeforeConversationRef.current = false
-        if ((window as any).atlasMusic?.resume) {
-          ;(window as any).atlasMusic.resume()
-          console.log('[Atlas] ✓ Music resumed')
-        }
-      }
-
-      setTimeout(() => {
-        startWakeWordDetection()
-      }, 300)
-    }, 15000) // 15 seconds
+    // No timeout set for front-desk conversations - they end when person is cleared
   }
 
   const clearConversationTimeout = () => {
@@ -107,6 +113,16 @@ export default function Home() {
       conversationTimeoutRef.current = null
     }
   }
+
+  // CRITICAL FIX: Memoize callbacks to prevent detection loop restarts
+  const canTriggerPresence = useCallback(() => {
+    return stateRef.current === 'idle' && !isProcessingRef.current
+  }, [])
+
+  // Memoize onPresenceConfirmed to keep reference stable
+  const memoizedStartFrontDeskConversation = useCallback(() => {
+    return startFrontDeskConversation()
+  }, [])
 
   useEffect(() => {
     console.log('[Atlas] Mounted, initializing')
@@ -119,6 +135,43 @@ export default function Home() {
       voiceInteraction.cancel().catch((e) => console.error('[Atlas] Cancel error:', e))
     }
   }, [])
+
+  useEffect(() => {
+    // Keep personStatusRef in sync (for use in callbacks that might have stale closure)
+    personStatusRef.current = frontDeskDebugState.personStatus
+
+    // CRITICAL: When person is cleared, ALWAYS stop listening - no conditions
+    if (frontDeskDebugState.personStatus === 'clear') {
+      console.log('==================== PERSON CLEARED - FORCE STOP ====================')
+      console.log('[FRONT DESK] Person is now CLEAR')
+      console.log('[FRONT DESK] FORCE STOPPING ALL LISTENING')
+      console.log('===================================================================')
+
+      // CRITICAL: Stop listening immediately - unconditional, multiple times to be sure
+      try {
+        console.log('[VOICE] >>> endListening()')
+        voiceInteraction.endListening()
+      } catch (e) {
+        console.log('[VOICE] endListening error (continuing):', e)
+      }
+
+      try {
+        console.log('[VOICE] >>> cancel()')
+        voiceInteraction.cancel()
+      } catch (e) {
+        console.log('[VOICE] cancel error (continuing):', e)
+      }
+
+      // Force state to idle
+      console.log('[VOICE] >>> setState(idle)')
+      setState('idle')
+      console.log('[VOICE] >>> isConversationActiveRef = false')
+      isConversationActiveRef.current = false
+      console.log('[VOICE] >>> isFrontDeskConversationRef = false')
+      isFrontDeskConversationRef.current = false
+      console.log('[VOICE] Listening STOPPED (forced)')
+    }
+  }, [frontDeskDebugState.personStatus])
 
   const startWakeWordDetection = () => {
     console.log('[Atlas] State check for wake word detection:', { state: stateRef.current, isProcessing: isProcessingRef.current })
@@ -136,6 +189,13 @@ export default function Home() {
   }
 
   const beginRequestListening = (mode: 'wake-word' | 'front-desk') => {
+    console.log('==================== VOICE ====================')
+    console.log('[VOICE] START LISTENING')
+    console.log('[VOICE] Reason: beginRequestListening(mode=' + mode + ')')
+    console.log('[VOICE] Person status: ' + frontDeskDebugState.personStatus)
+    console.log('[VOICE] Is front-desk conversation: ' + isFrontDeskConversationRef.current)
+    console.log('==============================================')
+
     console.log('[Atlas] Beginning request listening:', { mode })
     isConversationActiveRef.current = true
     requestSourceRef.current = mode
@@ -168,11 +228,33 @@ export default function Home() {
 
   const resumeConversationListening = () => {
     console.log('[Atlas] Resuming listening for next question in conversation')
+    console.log('[VOICE] Person status (from ref): ' + personStatusRef.current)
+
     if (isProcessingRef.current) {
       console.log('[Atlas] Still processing, will not resume listening yet')
       return
     }
 
+    // CRITICAL: DO NOT resume listening if person is not detected
+    // Use personStatusRef to avoid stale closure
+    if (personStatusRef.current !== 'detected') {
+      console.log('==================== LISTENING BLOCKED ====================')
+      console.log('[VOICE] Person is NOT detected - CANNOT resume listening')
+      console.log('[VOICE] Person status: ' + personStatusRef.current)
+      console.log('[VOICE] Stopping everything')
+      console.log('============================================================')
+
+      // Stop all listening and end session
+      voiceInteraction.endListening()
+      voiceInteraction.cancel().catch(() => {})
+
+      isConversationActiveRef.current = false
+      isFrontDeskConversationRef.current = false
+      setState('idle')
+      return
+    }
+
+    console.log('[VOICE] Person IS detected - resuming listening')
     beginRequestListening('front-desk')
   }
 
@@ -248,6 +330,11 @@ export default function Home() {
   }
 
   const startFrontDeskConversation = async () => {
+    console.log('==================== PERSON DETECTED - START ====================')
+    console.log('[FRONT DESK] Person DETECTED - Starting conversation')
+    console.log('[FRONT DESK] Person status: ' + frontDeskDebugState.personStatus)
+    console.log('================================================================')
+
     console.log('[Atlas] Front-desk person confirmed')
     if (isProcessingRef.current) {
       console.log('[Atlas] Already processing, front-desk trigger ignored')
@@ -256,18 +343,21 @@ export default function Home() {
 
     isProcessingRef.current = true
     isConversationActiveRef.current = true
+    isFrontDeskConversationRef.current = true
     clearConversationTimeout()
     resetConversationTimeout()
     setError(null)
     setTranscript('')
 
     try {
+      console.log('[FRONT DESK] Greeting START')
       await voiceInteraction.pauseWakeWordDetection()
       const greeting = getRandomPersonGreeting()
       console.log('[Atlas] Speaking person-detected greeting:', greeting)
       setState('speaking')
       voiceInteraction.setSpeaking(true)
       await voiceInteraction.speak(greeting)
+      console.log('[FRONT DESK] Greeting END')
       console.log('[Atlas] Greeting complete')
     } catch (err) {
       console.error('[Atlas] Greeting error:', err)
@@ -276,7 +366,7 @@ export default function Home() {
       voiceInteraction.setSpeaking(false)
     }
 
-    console.log('[Atlas] Listening for customer')
+    console.log('[VOICE] >>> Starting listening for customer input')
     beginRequestListening('front-desk')
   }
 
@@ -377,12 +467,14 @@ export default function Home() {
       console.log('[ATLAS MAIN] Text to speak:', response.substring(0, 100))
       await voiceInteraction.speak(response, () => {
         console.log('[ATLAS MAIN] Speaking finished, transitioning back to listening')
+        console.log('[TIMELINE] speak-callback | personStatus=' + frontDeskDebugState.personStatus + ' isFrontDesk=' + isFrontDeskConversationRef.current)
         setState('listening')
         voiceInteraction.setSpeaking(false)
         isProcessingRef.current = false
         setTranscript('')
         setError(null)
         // Resume listening for next question in conversation
+        console.log('[TIMELINE] about to call resumeConversationListening')
         resumeConversationListening()
       })
       console.log('[ATLAS MAIN] voiceInteraction.speak() completed successfully')
@@ -437,8 +529,8 @@ export default function Home() {
 
       <FrontDeskPresenceDetector
         enabled={frontDeskConfig.enabled}
-        canTriggerPresence={() => stateRef.current === 'idle' && !isProcessingRef.current}
-        onPresenceConfirmed={startFrontDeskConversation}
+        canTriggerPresence={canTriggerPresence}
+        onPresenceConfirmed={memoizedStartFrontDeskConversation}
         onDebugStateChange={setFrontDeskDebugState}
       />
 

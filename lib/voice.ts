@@ -295,8 +295,13 @@ class VoiceInteraction {
   }
 
   private scheduleRequestListeningRestart() {
+    console.log('==================== VOICE RESTART SCHEDULED ====================')
+    console.log('[VOICE] scheduleRequestListeningRestart()')
+    console.log('[VOICE] Will retry in 300ms')
+
     // Prevent multiple concurrent restart attempts
     if (this.isRequestRestartPending) {
+      console.log('[VOICE] NOT scheduling - already pending')
       log('[DEBUG] Request restart already pending, skipping duplicate schedule')
       return
     }
@@ -305,10 +310,13 @@ class VoiceInteraction {
     this.isRequestRestartPending = true
     log(`[DEBUG] Scheduling request listening restart in 300ms (mode: ${this.mode}, isListening: ${this.isListening}, requestListeningActive: ${this.requestListeningActive})`)
     this.requestRestartTimer = setTimeout(() => {
+      console.log('==================== VOICE RESTART ATTEMPT ====================')
+      console.log('[VOICE] Restart timeout fired - evaluating conditions...')
       this.isRequestRestartPending = false
       log('[DEBUG] Request listening restart timeout fired. Checking conditions...')
       log(`[DEBUG] mode: ${this.mode}, isListening: ${this.isListening}, requestListeningActive: ${this.requestListeningActive}, requestSessionFinishing: ${this.requestSessionFinishing}`)
       if (this.mode === 'request' && !this.isListening && this.requestListeningActive && !this.requestSessionFinishing) {
+        console.log('[VOICE] CONDITIONS MET - RESTARTING LISTENING')
         log('[DEBUG] Conditions met, restarting request listening')
         try {
           if (!this.requestRecognition) {
@@ -324,11 +332,18 @@ class VoiceInteraction {
             log('[DEBUG] ERROR: requestRecognition is still null after recreation!')
           }
         } catch (e) {
+          console.log('[VOICE] ERROR during restart: ' + e)
           log(`[DEBUG] ERROR: Failed to restart request listening: ${e}`)
         }
       } else {
+        console.log('[VOICE] NOT RESTARTING - conditions not met')
+        console.log('[VOICE] mode=' + this.mode + ' (need "request")')
+        console.log('[VOICE] isListening=' + this.isListening + ' (need false)')
+        console.log('[VOICE] requestListeningActive=' + this.requestListeningActive + ' (need true)')
+        console.log('[VOICE] requestSessionFinishing=' + this.requestSessionFinishing + ' (need false)')
         log('[DEBUG] Conditions NOT met for request restart')
       }
+      console.log('============================================================')
     }, 300)
   }
 
@@ -436,8 +451,16 @@ class VoiceInteraction {
     }
 
     recognition.onend = () => {
+      console.log('==================== VOICE RECOGNITION EVENT ====================')
+      console.log('[VOICE] speechRecognition.onend')
+      console.log('[VOICE] sessionId=' + sessionId + ' currentRequestSessionId=' + this.currentRequestSessionId)
+      console.log('[VOICE] isListening=' + this.isListening + ' requestSessionFinishing=' + this.requestSessionFinishing)
+      console.log('[VOICE] requestListeningActive=' + this.requestListeningActive + ' isSpeaking=' + this.isSpeaking)
+      console.log('==============================================================')
+
       // Ignore if this is a stale session
       if (sessionId !== this.currentRequestSessionId) {
+        console.log('[VOICE] NOT restarting - stale session (old sessionId)')
         log(`[DEBUG] Request onend (recreated): stale session, ignoring`)
         return
       }
@@ -449,6 +472,7 @@ class VoiceInteraction {
 
       // If we were finishing, call the callback with final transcript
       if (this.requestSessionFinishing) {
+        console.log('[VOICE] NOT restarting - session finishing normally')
         const transcript = this.savedRequestTranscript.trim()
         log(`[DEBUG] Recreated request session finished with transcript: "${transcript}"`)
         callbacks.onListeningEnded?.(transcript)
@@ -459,6 +483,7 @@ class VoiceInteraction {
         this.requestTranscript = ''
         this.requestListeningActive = false
       } else if (this.requestListeningActive && !this.isSpeaking) {
+        console.log('[VOICE] Attempting AUTOMATIC RESTART')
         log(`[DEBUG] Recreated request listening ended unexpectedly while still active`)
         this.scheduleRequestListeningRestart()
       }
@@ -738,6 +763,7 @@ class VoiceInteraction {
   }
 
   endListening() {
+    console.log('[VOICE] endListening() called | isListening=' + this.isListening + ' mode=' + this.mode)
     log('Silence timeout reached')
     this.clearSilenceTimer()
     this.clearRequestRestartTimer()
@@ -754,6 +780,7 @@ class VoiceInteraction {
 
     // Stop the request recognition if it's running
     if (this.requestRecognition && this.isListening) {
+      console.log('[VOICE] Aborting/stopping request recognition')
       try {
         ;(this.requestRecognition as any).abort()
       } catch (e) {
@@ -763,6 +790,8 @@ class VoiceInteraction {
           log(`Error stopping request recognition: ${e2}`)
         }
       }
+    } else {
+      console.log('[VOICE] Recognition not running or not listening: requestRecognition=' + !!this.requestRecognition + ' isListening=' + this.isListening)
     }
 
     // Don't call the callback here - let the request recognition's onend handler do it
