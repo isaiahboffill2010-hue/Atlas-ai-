@@ -32,6 +32,63 @@ export async function uploadFileToStorage(
   return storagePath
 }
 
+/**
+ * Uploads a customer design asset (logo or customer QR image) to the same
+ * bucket the knowledge library uses, under a `design-requests/` prefix.
+ *
+ * Unlike uploadFileToStorage, the caller passes a fully-formed storage key that
+ * was built from generated ids only (see buildUploadStorageKey) — the
+ * customer's filename is never part of the path.
+ */
+export async function uploadDesignAssetToStorage(
+  storageKey: string,
+  fileData: Buffer | Uint8Array,
+  contentType: string
+): Promise<string> {
+  const client = getSupabaseAdmin()
+
+  console.log(`[Storage] Uploading design asset to: ${storageKey}`)
+
+  const { error } = await client.storage.from(STORAGE_BUCKET).upload(storageKey, fileData, {
+    cacheControl: '3600',
+    contentType,
+    upsert: false,
+  })
+
+  if (error) {
+    console.error('[Storage] Error uploading design asset:', error)
+    throw error
+  }
+
+  console.log(`[Storage] Design asset uploaded successfully: ${storageKey}`)
+  return storageKey
+}
+
+/**
+ * A time-limited URL for a private object.
+ *
+ * The bucket is not public, so generated designs and customer assets are shown
+ * in the workspace through short-lived signed URLs rather than by making
+ * anything world-readable.
+ */
+export async function createSignedStorageUrl(
+  storagePath: string,
+  expiresInSeconds = 60 * 60
+): Promise<string | null> {
+  const client = getSupabaseAdmin()
+
+  const { data, error } = await client.storage
+    .from(STORAGE_BUCKET)
+    .createSignedUrl(storagePath, expiresInSeconds)
+
+  if (error) {
+    console.error('[Storage] Error creating signed URL:', error)
+    return null
+  }
+
+  return data?.signedUrl ?? null
+}
+
 export async function deleteFileFromStorage(storagePath: string): Promise<void> {
   const client = getSupabaseAdmin()
 

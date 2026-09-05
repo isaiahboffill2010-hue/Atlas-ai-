@@ -5,7 +5,11 @@ interface TTSResponse {
 
 let currentAudio: HTMLAudioElement | null = null
 
-export async function speakText(text: string, onEnd?: () => void): Promise<void> {
+export async function speakText(
+  text: string,
+  onEnd?: () => void,
+  onPlay?: () => void
+): Promise<void> {
   if (!text || text.trim().length === 0) {
     console.error('[TTS] Empty text provided')
     throw new Error('Text is required for TTS')
@@ -53,6 +57,10 @@ export async function speakText(text: string, onEnd?: () => void): Promise<void>
 
       currentAudio.onplay = () => {
         console.log('[TTS] Playing audio')
+      }
+
+      currentAudio.onplaying = () => {
+        if (onPlay) onPlay()
       }
 
       currentAudio.onended = () => {

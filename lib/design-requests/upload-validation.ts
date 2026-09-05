@@ -1,0 +1,229 @@
+/**
+ * Validation for the two images a customer may attach to a design request:
+ * their logo, and the QR code they want printed on the design.
+ *
+ * Nothing the browser tells us about a file is trusted. The real type is
+ * determined by sniffing the leading bytes, and the stored object key is built
+ * entirely from values we generate — the customer's filename never reaches the
+ * storage layer, so there is no path traversal or extension-spoofing surface.
+ *
+ * Pure module: no Supabase or Next imports, so it is directly unit testable.
+ */
+
+import { isValidRequestId } from './validation'
+import type { UploadKind } from './types'
+
+/** Per-file cap. Logos and QR codes are small; 5 MB is generous. */
+export const MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+
+/** Cap on the whole multipart request (two images plus the text fields). */
+export const MAX_REQUEST_BYTES = 12 * 1024 * 1024
+
+/**
+ * Raster formats only. SVG is deliberately excluded: it is an XML document that
+ * can carry script, and it cannot be verified by magic bytes.
+ */
+export interface ImageFormat {
+  mimeType: string
+  extension: string
+}
+
+const PNG: ImageFormat = { mimeType: 'image/png', extension: 'png' }
+const JPEG: ImageFormat = { mimeType: 'image/jpeg', extension: 'jpg' }
+const WEBP: ImageFormat = { mimeType: 'image/webp', extension: 'webp' }
+
+export const ALLOWED_IMAGE_FORMATS: ImageFormat[] = [PNG, JPEG, WEBP]
+
+/** Extensions a customer might send, mapped to the format they claim to be. */
+const EXTENSION_CLAIMS: Record<string, ImageFormat> = {
+  png: PNG,
+  jpg: JPEG,
+  jpeg: JPEG,
+  jpe: JPEG,
+  webp: WEBP,
+}
+
+/** Mime types a browser might send, mapped to the format they claim to be. */
+const MIME_CLAIMS: Record<string, ImageFormat> = {
+  'image/png': PNG,
+  'image/jpeg': JPEG,
+  'image/jpg': JPEG,
+  'image/webp': WEBP,
+}
+
+export type UploadValidation =
+  | { ok: true; format: ImageFormat }
+  | { ok: false; error: string }
+
+/** Identifies the true format from the file's leading bytes, or null. */
+export function sniffImageFormat(data: Buffer | Uint8Array): ImageFormat | null {
+  const bytes = data instanceof Buffer ? data : Buffer.from(data)
+
+  if (
+    bytes.length >= 8 &&
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47 &&
+    bytes[4] === 0x0d &&
+    bytes[5] === 0x0a &&
+    bytes[6] === 0x1a &&
+    bytes[7] === 0x0a
+  ) {
+    return PNG
+  }
+
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) {
+    return JPEG
+  }
+
+  if (
+    bytes.length >= 12 &&
+    bytes.toString('ascii', 0, 4) === 'RIFF' &&
+    bytes.toString('ascii', 8, 12) === 'WEBP'
+  ) {
+    return WEBP
+  }
+
+  return null
+}
+
+/** The format the client's filename/mime type claims, ignoring any path parts. */
+export function claimedImageFormat(filename?: string, mimeType?: string): ImageFormat | null {
+  if (mimeType) {
+    const claimed = MIME_CLAIMS[mimeType.split(';')[0].trim().toLowerCase()]
+    if (claimed) return claimed
+  }
+
+  if (filename) {
+    // Take only what follows the final dot of the final path segment, so
+    // "../../evil/logo.png" still just claims "png".
+    const base = filename.split(/[\\/]/).pop() || ''
+    const dot = base.lastIndexOf('.')
+    if (dot > -1) {
+      const claimed = EXTENSION_CLAIMS[base.slice(dot + 1).toLowerCase()]
+      if (claimed) return claimed
+    }
+  }
+
+  return null
+}
+
+/**
+ * Validates an uploaded image by content.
+ *
+ * A file whose real format contradicts the extension/mime type the client sent
+ * is rejected rather than quietly stored under a corrected extension — silently
+ * relabelling would hide a mistake the customer needs to know about.
+ */
+export function validateImageUpload(
+  data: Buffer | Uint8Array,
+  options: { filename?: string; mimeType?: string; truncated?: boolean } = {}
+): UploadValidation {
+  if (options.truncated) {
+    return { ok: false, error: `File is larger than the ${formatMb(MAX_UPLOAD_BYTES)} limit` }
+  }
+
+  if (data.length === 0) {
+    return { ok: false, error: 'File is empty' }
+  }
+
+  if (data.length > MAX_UPLOAD_BYTES) {
+    return { ok: false, error: `File is larger than the ${formatMb(MAX_UPLOAD_BYTES)} limit` }
+  }
+
+  const actual = sniffImageFormat(data)
+  if (!actual) {
+    return { ok: false, error: 'File must be a PNG, JPEG, or WebP image' }
+  }
+
+  const claimed = claimedImageFormat(options.filename, options.mimeType)
+  if (claimed && claimed.mimeType !== actual.mimeType) {
+    return {
+      ok: false,
+      error: `File contents are ${actual.mimeType} but it was sent as ${claimed.mimeType}`,
+    }
+  }
+
+  return { ok: true, format: actual }
+}
+
+function formatMb(bytes: number): string {
+  return `${Math.round(bytes / (1024 * 1024))} MB`
+}
+
+/**
+ * Builds the storage object key for an upload:
+ *   design-requests/<requestId>/<logo|customer_qr>.<ext>
+ *
+ * Every segment is generated by us — a validated request UUID, a fixed kind,
+ * and an extension derived from the sniffed format — so the customer cannot
+ * influence the path at all and their filename never reaches storage.
+ */
+export function buildUploadStorageKey(
+  requestId: string,
+  kind: UploadKind,
+  format: ImageFormat
+): string {
+  if (!isValidRequestId(requestId)) {
+    throw new Error('Refusing to build a storage key for an invalid request id')
+  }
+
+  return `design-requests/${requestId}/${kind}.${format.extension}`
+}
+
+/**
+ * Storage key for a design the engine produced:
+ *   design-requests/<requestId>/generated/<surface>.<ext>
+ *
+ * Kept in a separate `generated/` folder so what the customer uploaded and what
+ * Atlas made are never confused with one another.
+ */
+export function buildGeneratedStorageKey(
+  requestId: string,
+  role: string,
+  format: ImageFormat,
+  attempt = 1
+): string {
+  if (!isValidRequestId(requestId)) {
+    throw new Error('Refusing to build a storage key for an invalid request id')
+  }
+  if (!/^[a-z_]+$/.test(role)) {
+    throw new Error('Refusing to build a storage key for an unrecognised surface')
+  }
+
+  // Regenerating a side must not collide with the previous attempt, which
+  // Supabase storage would reject as an existing object.
+  const suffix = attempt > 1 ? `-${attempt}` : ''
+  return `design-requests/${requestId}/generated/${role}${suffix}.${format.extension}`
+}
+
+/**
+ * Validates bytes the design engine produced before they are stored.
+ *
+ * The model's output is checked with the same magic-byte sniffing as a customer
+ * upload — an upstream change or an error page must never be written into
+ * storage and shown to a customer as their design.
+ */
+export function validateGeneratedImage(
+  data: Buffer | Uint8Array,
+  declaredMimeType?: string
+): UploadValidation {
+  if (data.length === 0) {
+    return { ok: false, error: 'The design came back empty' }
+  }
+
+  const actual = sniffImageFormat(data)
+  if (!actual) {
+    return { ok: false, error: 'The design came back in an unreadable format' }
+  }
+
+  if (declaredMimeType) {
+    const claimed = MIME_CLAIMS[declaredMimeType.split(';')[0].trim().toLowerCase()]
+    if (claimed && claimed.mimeType !== actual.mimeType) {
+      return { ok: false, error: 'The design contents did not match its declared type' }
+    }
+  }
+
+  return { ok: true, format: actual }
+}

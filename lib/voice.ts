@@ -1,6 +1,7 @@
 import { speakText, stopSpeaking } from './tts'
+import { cancelActiveStreamingSpeech } from './streaming-player'
+import { SILENCE_TIMEOUT_MS } from './voice-config'
 
-const SILENCE_TIMEOUT_MS = 2000
 const DEBUG = true
 
 function log(message: string) {
@@ -811,13 +812,17 @@ class VoiceInteraction {
     this.shouldIgnorePendingResponse = false
   }
 
-  async speak(text: string, onEnd?: () => void): Promise<void> {
+  async speak(text: string, onEnd?: () => void, onPlay?: () => void): Promise<void> {
     try {
       log('Starting ElevenLabs TTS')
-      await speakText(text, () => {
-        log('TTS finished')
-        onEnd?.()
-      })
+      await speakText(
+        text,
+        () => {
+          log('TTS finished')
+          onEnd?.()
+        },
+        onPlay
+      )
     } catch (error) {
       log(`TTS error: ${error}`)
       this.callbacks.onError?.(`Speech synthesis error: ${error}`)
@@ -860,11 +865,20 @@ class VoiceInteraction {
       }
     }
 
-    // Stop TTS playback
+    // Stop TTS playback (both the buffered and the streaming pipelines)
     stopSpeaking()
+    cancelActiveStreamingSpeech()
 
     this.isSpeaking = false
     this.isListening = false
+  }
+
+  /** Stop any audio Atlas is currently producing, whichever pipeline made it. */
+  stopAllSpeech() {
+    log('Stopping all speech output')
+    stopSpeaking()
+    cancelActiveStreamingSpeech()
+    this.isSpeaking = false
   }
 }
 

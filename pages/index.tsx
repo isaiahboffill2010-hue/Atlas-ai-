@@ -7,7 +7,13 @@ import Sidebar from '../components/Sidebar'
 import MusicPlayer from '../components/MusicPlayer'
 import { voiceInteraction } from '../lib/voice'
 import { askAtlas } from '../lib/atlas'
-import { stopSpeaking } from '../lib/tts'
+import { askAtlasStreaming } from '../lib/atlas-stream'
+import { SentenceChunker } from '../lib/text-chunker'
+import { StreamingSpeech } from '../lib/streaming-player'
+import { LatencyTracker, MARKS } from '../lib/latency'
+import { STREAMING_TTS_ENABLED } from '../lib/voice-config'
+import { defaultThinkingVariant } from '../lib/gemini-thinking'
+import { stripMarkdownForSpeech } from '../lib/tts-text'
 import FrontDeskPresenceDetector from '../components/FrontDeskPresenceDetector'
 import {
   defaultFrontDeskDebugState,
@@ -16,6 +22,8 @@ import {
 } from '../lib/frontDesk'
 import { parseMusicCommand } from '../lib/music/music-command-parser'
 import { handleMusicCommand } from '../lib/music/handle-music-command'
+import DesignRequestWatcher from '../components/DesignRequestWatcher'
+import type { DesignRequestRecord } from '../lib/design-requests/types'
 
 const PERSON_DETECTION_GREETINGS = [
   'Hi! Welcome! How can I help you today?',
@@ -44,6 +52,17 @@ function getRandomPersonGreeting(): string {
   return PERSON_DETECTION_GREETINGS[Math.floor(Math.random() * PERSON_DETECTION_GREETINGS.length)]
 }
 
+/**
+ * Everything cancellable about the turn Atlas is currently answering: the
+ * Gemini stream, the ElevenLabs requests, and the audio queue.
+ */
+interface ActiveTurn {
+  token: object
+  abort: AbortController
+  speech: StreamingSpeech
+  tracker: LatencyTracker
+}
+
 export default function Home() {
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const [state, setState] = useState<AtlasState>('idle')
@@ -58,6 +77,34 @@ export default function Home() {
   const requestSourceRef = useRef<'wake-word' | 'front-desk' | null>(null)
   const musicWasPlayingBeforeConversationRef = useRef(false)
   const personStatusRef = useRef<string>('unknown')
+  const activeTurnRef = useRef<ActiveTurn | null>(null)
+
+  /**
+   * Tear down the in-flight response: stop audio, abort queued and in-flight
+   * ElevenLabs requests, and abort the Gemini stream (which the server sees as
+   * a disconnect and stops generating for).
+   */
+  const abortActiveTurn = (reason: string) => {
+    const turn = activeTurnRef.current
+    if (!turn) return
+
+    console.log(`[ATLAS STREAM] Aborting active turn — ${reason}`)
+    activeTurnRef.current = null
+
+    try {
+      turn.speech.cancel()
+    } catch (e) {
+      console.error('[ATLAS STREAM] Error cancelling speech:', e)
+    }
+
+    try {
+      turn.abort.abort()
+    } catch (e) {
+      console.error('[ATLAS STREAM] Error aborting Gemini stream:', e)
+    }
+
+    turn.tracker.mark('turn-aborted', reason)
+  }
 
   useEffect(() => {
     stateRef.current = state
@@ -74,6 +121,7 @@ export default function Home() {
     console.log('[Atlas] Ending conversation session')
 
     // CRITICAL: Stop listening and microphone
+    abortActiveTurn('conversation session ended')
     voiceInteraction.endListening()
     voiceInteraction.cancel().catch(() => {})
 
@@ -114,6 +162,47 @@ export default function Home() {
     }
   }
 
+  /**
+   * A customer finished the form on their phone. Atlas acknowledges it out
+   * loud, but only from a standing start: if Atlas is listening, thinking or
+   * mid-answer, the arrival is logged and shown on screen instead, because
+   * cutting into a live turn would be worse than staying quiet. The design
+   * itself is generated in a later phase.
+   */
+  const handleDesignRequestReceived = useCallback(async (request: DesignRequestRecord) => {
+    console.log('[Atlas] Customer information arrived from /session:', {
+      designType: request.design_type,
+      businessName: request.business_name,
+      hasLogo: !!request.logo_file_reference,
+      hasCustomerQr: !!request.customer_qr_file_reference,
+    })
+
+    if (stateRef.current !== 'idle' || isProcessingRef.current) {
+      console.log('[Atlas] Busy, not announcing the design request out loud')
+      return
+    }
+
+    isProcessingRef.current = true
+
+    try {
+      await voiceInteraction.pauseWakeWordDetection()
+      setState('speaking')
+      voiceInteraction.setSpeaking(true)
+      await voiceInteraction.speak(
+        `Got it! I have your information for ${request.business_name}. Let's create your design.`
+      )
+    } catch (err) {
+      console.error('[Atlas] Failed to announce design request:', err)
+    } finally {
+      voiceInteraction.setSpeaking(false)
+      isProcessingRef.current = false
+      setState('idle')
+      setTimeout(() => {
+        startWakeWordDetection()
+      }, 300)
+    }
+  }, [])
+
   // CRITICAL FIX: Memoize callbacks to prevent detection loop restarts
   const canTriggerPresence = useCallback(() => {
     return stateRef.current === 'idle' && !isProcessingRef.current
@@ -148,6 +237,13 @@ export default function Home() {
       console.log('===================================================================')
 
       // CRITICAL: Stop listening immediately - unconditional, multiple times to be sure
+      try {
+        console.log('[VOICE] >>> abortActiveTurn()')
+        abortActiveTurn('person cleared')
+      } catch (e) {
+        console.log('[VOICE] abortActiveTurn error (continuing):', e)
+      }
+
       try {
         console.log('[VOICE] >>> endListening()')
         voiceInteraction.endListening()
@@ -297,7 +393,8 @@ export default function Home() {
       return
     }
 
-    // Cancel any pending operations
+    // Cancel any pending operations, including a response that is mid-flight
+    abortActiveTurn('stop command')
     isProcessingRef.current = false
     isConversationActiveRef.current = false
     requestSourceRef.current = null
@@ -310,7 +407,7 @@ export default function Home() {
 
     if (stateRef.current === 'speaking') {
       console.log('[Atlas] Stopping TTS')
-      stopSpeaking()
+      voiceInteraction.stopAllSpeech()
       voiceInteraction.setSpeaking(false)
     }
 
@@ -368,6 +465,178 @@ export default function Home() {
 
     console.log('[VOICE] >>> Starting listening for customer input')
     beginRequestListening('front-desk')
+  }
+
+  /** Shared end-of-turn handling for both the streaming and buffered pipelines. */
+  const finishTurn = () => {
+    console.log('[ATLAS MAIN] Speaking finished, transitioning back to listening')
+    console.log('[TIMELINE] speak-callback | personStatus=' + frontDeskDebugState.personStatus + ' isFrontDesk=' + isFrontDeskConversationRef.current)
+    setState('listening')
+    voiceInteraction.setSpeaking(false)
+    isProcessingRef.current = false
+    setTranscript('')
+    setError(null)
+    // Resume listening for next question in conversation
+    console.log('[TIMELINE] about to call resumeConversationListening')
+    resumeConversationListening()
+  }
+
+  /**
+   * Streaming pipeline: Gemini text streams in, is cut into natural chunks, and
+   * each chunk goes to ElevenLabs as soon as it exists. Atlas starts speaking
+   * on the first chunk while Gemini is still writing the rest.
+   *
+   * Returns true if the turn was handled (spoken, or deliberately interrupted).
+   * Returns false if it failed before any audio played, so the caller can fall
+   * back to the original buffered pipeline.
+   */
+  const runStreamingTurn = async (request: string, tracker: LatencyTracker): Promise<boolean> => {
+    const token = {}
+    const abort = new AbortController()
+    const chunker = new SentenceChunker()
+
+    const speech = new StreamingSpeech(
+      {
+        onFirstAudioPlaying: () => {
+          if (activeTurnRef.current?.token !== token) return
+          console.log('[ATLAS STREAM] First audio playing — thinking -> speaking')
+          setState('speaking')
+          voiceInteraction.setSpeaking(true)
+        },
+        onChunkError: (error, text) => {
+          console.error(`[ATLAS STREAM] Chunk failed ("${text.slice(0, 40)}"):`, error.message)
+        },
+      },
+      tracker
+    )
+
+    activeTurnRef.current = { token, abort, speech, tracker }
+    const isCurrent = () => activeTurnRef.current?.token === token
+
+    let fullText = ''
+
+    try {
+      tracker.mark(MARKS.GEMINI_REQUEST_STARTED)
+
+      fullText = await askAtlasStreaming(request, {
+        signal: abort.signal,
+        onFirstDelta: () => tracker.markOnce(MARKS.FIRST_GEMINI_TEXT),
+        onDelta: (delta) => {
+          if (!isCurrent()) return
+          for (const chunk of chunker.push(delta)) {
+            tracker.markOnce(MARKS.FIRST_CHUNK_READY, `"${chunk}"`)
+            // Markdown is stripped on the way to TTS only; the stored and
+            // logged response text stays exactly as Gemini wrote it.
+            speech.enqueue(stripMarkdownForSpeech(chunk))
+          }
+        },
+      })
+
+      if (!isCurrent()) {
+        console.log('[ATLAS STREAM] Turn was interrupted during generation')
+        speech.cancel()
+        return true
+      }
+
+      tracker.mark(MARKS.GEMINI_COMPLETE, `${fullText.length} chars`)
+
+      const tail = chunker.flush()
+      if (tail) {
+        tracker.markOnce(MARKS.FIRST_CHUNK_READY, `"${tail}"`)
+        speech.enqueue(stripMarkdownForSpeech(tail))
+      }
+
+      await speech.finish()
+    } catch (error: any) {
+      const played = speech.hasPlayedAudio
+      speech.cancel()
+
+      if (!isCurrent() || error?.name === 'AbortError') {
+        console.log('[ATLAS STREAM] Turn aborted; leaving state handling to the interrupt path')
+        return true
+      }
+
+      activeTurnRef.current = null
+
+      if (!played) {
+        console.warn('[ATLAS STREAM] Failed before any audio played:', error)
+        return false
+      }
+
+      console.error('[ATLAS STREAM] Failed mid-speech, ending turn:', error)
+      tracker.mark(MARKS.RESPONSE_COMPLETE, 'error after partial audio')
+      tracker.summary()
+      finishTurn()
+      return true
+    }
+
+    if (!isCurrent()) {
+      console.log('[ATLAS STREAM] Turn was interrupted during playback')
+      return true
+    }
+
+    // Text came back but nothing was audible — synthesise it the old way rather
+    // than leaving the customer in silence. No second Gemini call.
+    if (!speech.hasPlayedAudio && fullText.trim().length > 0) {
+      console.warn('[ATLAS STREAM] No audio played; falling back to buffered TTS for this response')
+      setState('speaking')
+      voiceInteraction.setSpeaking(true)
+      await voiceInteraction.speak(stripMarkdownForSpeech(fullText))
+    }
+
+    activeTurnRef.current = null
+    tracker.mark(MARKS.RESPONSE_COMPLETE, `${fullText.length} chars`)
+    tracker.summary()
+    finishTurn()
+    return true
+  }
+
+  /** Original pipeline: full Gemini response, then full ElevenLabs file, then play. */
+  const runBufferedTurn = async (request: string, tracker: LatencyTracker) => {
+    console.log('[ATLAS MAIN] Sending request to Atlas:', request)
+    tracker.mark(MARKS.GEMINI_REQUEST_STARTED, 'buffered')
+
+    const response = await askAtlas(request)
+    console.log('[ATLAS MAIN] askAtlas returned successfully')
+    console.log('[ATLAS MAIN] Response length:', response?.length || 0)
+    tracker.mark(MARKS.GEMINI_COMPLETE, `${response?.length || 0} chars`)
+
+    // Check if stop command was detected while we were thinking
+    console.log('[ATLAS MAIN] Checking stop command flag')
+    if (voiceInteraction.getPendingResponseIgnoreFlag()) {
+      console.log('[ATLAS MAIN] EARLY RETURN: Stop command detected during thinking')
+      voiceInteraction.resetPendingResponseIgnoreFlag()
+      isProcessingRef.current = false
+      isConversationActiveRef.current = false
+      setTranscript('')
+      setError(null)
+      setState('idle')
+      setTimeout(() => {
+        startWakeWordDetection()
+      }, 300)
+      return
+    }
+
+    console.log('[ATLAS MAIN] Stop command flag not set, proceeding to speak')
+    setState('speaking')
+    voiceInteraction.setSpeaking(true)
+
+    console.log('[ATLAS MAIN] Text to speak:', response.substring(0, 100))
+    tracker.mark(MARKS.FIRST_TTS_REQUEST_STARTED, 'buffered: whole response')
+
+    await voiceInteraction.speak(
+      stripMarkdownForSpeech(response),
+      () => {
+        tracker.mark(MARKS.RESPONSE_COMPLETE, `${response.length} chars`)
+        tracker.summary()
+        finishTurn()
+      },
+      () => {
+        tracker.markOnce(MARKS.FIRST_AUDIO_RECEIVED, 'buffered: whole file')
+        tracker.markOnce(MARKS.FIRST_AUDIO_PLAYED, 'buffered')
+      }
+    )
+    console.log('[ATLAS MAIN] voiceInteraction.speak() completed successfully')
   }
 
   const handleListeningEnded = async (userRequest: string) => {
@@ -433,51 +702,21 @@ export default function Home() {
       setState('thinking')
       setTranscript('')
 
-    try {
-      console.log('[ATLAS MAIN] Sending request to Atlas:', cleanedRequest)
-      const response = await askAtlas(cleanedRequest)
-      console.log('[ATLAS MAIN] askAtlas returned successfully')
-      console.log('[ATLAS MAIN] Got response from Atlas:', response)
-      console.log('[ATLAS MAIN] Response type:', typeof response)
-      console.log('[ATLAS MAIN] Response length:', response?.length || 0)
-      console.log('[ATLAS MAIN] Response is empty?', !response || response.trim().length === 0)
+    // The turn clock starts the moment the customer stops talking, so every
+    // mark reflects what they actually experience.
+    // Labels every log line with the active thinking variant, so A/B runs in the
+    // browser console are unambiguous: [LATENCY][baseline][turn-3] ...
+    const tracker = new LatencyTracker('turn', defaultThinkingVariant())
+    tracker.mark(MARKS.USER_STOPPED_SPEAKING, `"${cleanedRequest.slice(0, 60)}"`)
 
-      // Check if stop command was detected while we were thinking
-      console.log('[ATLAS MAIN] Checking stop command flag')
-      if (voiceInteraction.getPendingResponseIgnoreFlag()) {
-        console.log('[ATLAS MAIN] EARLY RETURN: Stop command detected during thinking')
-        voiceInteraction.resetPendingResponseIgnoreFlag()
-        isProcessingRef.current = false
-        isConversationActiveRef.current = false
-        setTranscript('')
-        setError(null)
-        setState('idle')
-        setTimeout(() => {
-          startWakeWordDetection()
-        }, 300)
-        return
+    try {
+      if (STREAMING_TTS_ENABLED) {
+        const handled = await runStreamingTurn(cleanedRequest, tracker)
+        if (handled) return
+        console.warn('[ATLAS MAIN] Streaming turn did not produce audio, using buffered pipeline')
       }
 
-      console.log('[ATLAS MAIN] Stop command flag not set, proceeding to speak')
-      console.log('[ATLAS MAIN] Setting state to speaking')
-      setState('speaking')
-      voiceInteraction.setSpeaking(true)
-
-      console.log('[ATLAS MAIN] About to call voiceInteraction.speak()')
-      console.log('[ATLAS MAIN] Text to speak:', response.substring(0, 100))
-      await voiceInteraction.speak(response, () => {
-        console.log('[ATLAS MAIN] Speaking finished, transitioning back to listening')
-        console.log('[TIMELINE] speak-callback | personStatus=' + frontDeskDebugState.personStatus + ' isFrontDesk=' + isFrontDeskConversationRef.current)
-        setState('listening')
-        voiceInteraction.setSpeaking(false)
-        isProcessingRef.current = false
-        setTranscript('')
-        setError(null)
-        // Resume listening for next question in conversation
-        console.log('[TIMELINE] about to call resumeConversationListening')
-        resumeConversationListening()
-      })
-      console.log('[ATLAS MAIN] voiceInteraction.speak() completed successfully')
+      await runBufferedTurn(cleanedRequest, tracker)
     } catch (err) {
       console.error('[ATLAS MAIN] EXCEPTION caught:', err)
       setError(err instanceof Error ? err.message : 'Unknown error')
@@ -526,6 +765,8 @@ export default function Home() {
       <VoiceInput state={state} transcript={transcript} />
 
       <MusicPlayer />
+
+      <DesignRequestWatcher onRequestReceived={handleDesignRequestReceived} />
 
       <FrontDeskPresenceDetector
         enabled={frontDeskConfig.enabled}
